@@ -23,16 +23,34 @@
 #include <cmath>
 #include <map>
 #include <boost/format.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
+
+// On pure 32-bit machines, use boost for 128-bit integer type.
+#if __x86_64__
+  typedef __int128_t Int128;
+  typedef __uint128_t Uint128;
+#else
+  #include <boost/multiprecision/cpp_int.hpp>
+  boost::multiprecision::int128_t Int128;
+  boost::multiprecision::uint128_t Uint128;
+#endif
+
 #include <string.h>
 #include <time.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+
+#ifndef __MINGW64__
 #include <sys/uio.h>
 #include <sys/utsname.h>
+#endif
+
 #include <assert.h>
 #include <signal.h>
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 #include "Core.hpp"
 #include "instforms.hpp"
 
@@ -906,19 +924,19 @@ printUnsignedHisto(const char* tag, const std::vector<uint64_t>& histo,
     return;
 
   if (histo.at(0))
-    fprintf(file, "    %s  0          %ld\n", tag, histo.at(0));
+    fprintf(file, "    %s  0          %" PRId64 "\n", tag, histo.at(0));
   if (histo.at(1))
-    fprintf(file, "    %s  1          %ld\n", tag, histo.at(1));
+    fprintf(file, "    %s  1          %" PRId64 "\n", tag, histo.at(1));
   if (histo.at(2))
-    fprintf(file, "    %s  2          %ld\n", tag, histo.at(2));
+    fprintf(file, "    %s  2          %" PRId64 "\n", tag, histo.at(2));
   if (histo.at(3))
-    fprintf(file, "    %s  (2,   16]  %ld\n", tag, histo.at(3));
+    fprintf(file, "    %s  (2,   16]  %" PRId64 "\n", tag, histo.at(3));
   if (histo.at(4))
-    fprintf(file, "    %s  (16,  1k]  %ld\n", tag, histo.at(4));
+    fprintf(file, "    %s  (16,  1k]  %" PRId64 "\n", tag, histo.at(4));
   if (histo.at(5))
-    fprintf(file, "    %s  (1k, 64k]  %ld\n", tag, histo.at(5));
+    fprintf(file, "    %s  (1k, 64k]  %" PRId64 "\n", tag, histo.at(5));
   if (histo.at(6))
-    fprintf(file, "    %s  > 64k      %ld\n", tag, histo.at(6));
+    fprintf(file, "    %s  > 64k      %" PRId64 "\n", tag, histo.at(6));
 }
 
 
@@ -931,31 +949,31 @@ printSignedHisto(const char* tag, const std::vector<uint64_t>& histo,
     return;
 
   if (histo.at(0))
-    fprintf(file, "    %s <= 64k      %ld\n", tag, histo.at(0));
+    fprintf(file, "    %s <= 64k      %" PRId64 "\n", tag, histo.at(0));
   if (histo.at(1))
-    fprintf(file, "    %s (-64k, -1k] %ld\n", tag, histo.at(1));
+    fprintf(file, "    %s (-64k, -1k] %" PRId64 "\n", tag, histo.at(1));
   if (histo.at(2))
-    fprintf(file, "    %s (-1k,  -16] %ld\n", tag, histo.at(2));
+    fprintf(file, "    %s (-1k,  -16] %" PRId64 "\n", tag, histo.at(2));
   if (histo.at(3))
-    fprintf(file, "    %s (-16,   -3] %ld\n", tag, histo.at(3));
+    fprintf(file, "    %s (-16,   -3] %" PRId64 "\n", tag, histo.at(3));
   if (histo.at(4))
-    fprintf(file, "    %s -2          %ld\n", tag, histo.at(4));
+    fprintf(file, "    %s -2          %" PRId64 "\n", tag, histo.at(4));
   if (histo.at(5))
-    fprintf(file, "    %s -1          %ld\n", tag, histo.at(5));
+    fprintf(file, "    %s -1          %" PRId64 "\n", tag, histo.at(5));
   if (histo.at(6))
-    fprintf(file, "    %s 0           %ld\n", tag, histo.at(6));
+    fprintf(file, "    %s 0           %" PRId64 "\n", tag, histo.at(6));
   if (histo.at(7))
-    fprintf(file, "    %s 1           %ld\n", tag, histo.at(7));
+    fprintf(file, "    %s 1           %" PRId64 "\n", tag, histo.at(7));
   if (histo.at(8))
-    fprintf(file, "    %s 2           %ld\n", tag, histo.at(8));
+    fprintf(file, "    %s 2           %" PRId64 "\n", tag, histo.at(8));
   if (histo.at(9))
-    fprintf(file, "    %s (2,     16] %ld\n", tag, histo.at(9));
+    fprintf(file, "    %s (2,     16] %" PRId64 "\n", tag, histo.at(9));
   if (histo.at(10))
-    fprintf(file, "    %s (16,    1k] %ld\n", tag, histo.at(10));
+    fprintf(file, "    %s (16,    1k] %" PRId64 "\n", tag, histo.at(10));
   if (histo.at(11))	              
-    fprintf(file, "    %s (1k,   64k] %ld\n", tag, histo.at(11));
+    fprintf(file, "    %s (1k,   64k] %" PRId64 "\n", tag, histo.at(11));
   if (histo.at(12))	              
-    fprintf(file, "    %s > 64k       %ld\n", tag, histo.at(12));
+    fprintf(file, "    %s > 64k       %" PRId64 "\n", tag, histo.at(12));
 }
 
 
@@ -992,7 +1010,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
       if (not freq)
 	continue;
 
-      fprintf(file, "%s %ld\n", info.name().c_str(), freq);
+      fprintf(file, "%s %" PRId64 "\n", info.name().c_str(), freq);
 
       auto regCount = intRegCount();
 
@@ -1003,7 +1021,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rd");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rd_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rd_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rd_.at(i));
 	  fprintf(file, "\n");
 	}
 
@@ -1014,7 +1032,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rs1");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rs1_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rs1_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rs1_.at(i));
 	  fprintf(file, "\n");
 
 	  const auto& histo = prof.rs1Histo_;
@@ -1031,7 +1049,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rs2");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rs2_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rs2_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rs2_.at(i));
 	  fprintf(file, "\n");
 
 	  const auto& histo = prof.rs2Histo_;
@@ -1873,46 +1891,69 @@ template <typename URV>
 void
 formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
 		const char* opcode, char resource, URV addr,
-		URV value, const char* assembly)
+		URV value, const char* assembly);
+
+template <>
+void
+formatInstTrace<uint32_t>(FILE* out, uint64_t tag, unsigned hartId, uint32_t currPc,
+		const char* opcode, char resource, uint32_t addr,
+		uint32_t value, const char* assembly)
 {
-  if constexpr (sizeof(URV) == 4)
+  if (resource == 'r')
     {
-      if (resource == 'r')
-	{
-	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
-	}
-      else if (resource == 'c')
-	{
-	  if ((addr >> 16) == 0)
-	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
-	  else
-	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
-	}
+      fprintf(out, "#%" PRId64 " %d %08x %8s r %02x         %08x  %s",
+              tag, hartId, currPc, opcode, addr, value, assembly);
+    }
+  else if (resource == 'c')
+    {
+      if ((addr >> 16) == 0)
+        fprintf(out, "#%" PRId64 " %d %08x %8s c %04x       %08x  %s",
+                tag, hartId, currPc, opcode, addr, value, assembly);
       else
-	{
-	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
-	}
+        fprintf(out, "#%" PRId64 " %d %08x %8s c %08x   %08x  %s",
+                tag, hartId, currPc, opcode, addr, value, assembly);
     }
   else
     {
-	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
+      fprintf(out, "#%" PRId64 " %d %08x %8s %c %08x   %08x  %s", tag, hartId,
+              currPc, opcode, resource, addr, value, assembly);
     }
 }
 
+template <>
+void
+formatInstTrace<uint64_t>(FILE* out, uint64_t tag, unsigned hartId, uint64_t currPc,
+		const char* opcode, char resource, uint64_t addr,
+		uint64_t value, const char* assembly)
+{
+  fprintf(out, "#%" PRId64 " %d %016" PRIx64 " %8s %c %016" PRIx64 " %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, resource, addr, value, assembly);
+}
 
 template <typename URV>
 void
 formatFpInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
 		  const char* opcode, unsigned fpReg,
+		  uint64_t fpVal, const char* assembly);
+
+template <>
+void
+formatFpInstTrace<uint32_t>(FILE* out, uint64_t tag, unsigned hartId, uint32_t currPc,
+		  const char* opcode, unsigned fpReg,
 		  uint64_t fpVal, const char* assembly)
 {
-  if constexpr (sizeof(URV) == 4)
-    fprintf(out, "#%ld %d %08x %8s f %02x %016lx  %s",
-	    tag, hartId, currPc, opcode, fpReg, fpVal, assembly);
+  fprintf(out, "#%" PRId64 " %d %08x %8s f %02x %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, fpReg, fpVal, assembly);
+}
 
-  else
-    fprintf(out, "#%ld %d %016lx %8s f %016lx %016lx  %s",
-	    tag, hartId, currPc, opcode, uint64_t(fpReg), fpVal, assembly);
+template <>
+void
+formatFpInstTrace<uint64_t>(FILE* out, uint64_t tag, unsigned hartId, uint64_t currPc,
+		  const char* opcode, unsigned fpReg,
+		  uint64_t fpVal, const char* assembly)
+{
+  fprintf(out, "#%" PRId64 " %d %016" PRIx64 " %8s f %016" PRIx64 " %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, uint64_t(fpReg), fpVal, assembly);
 }
 
 
@@ -2695,6 +2736,17 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   uint64_t limit = instCountLim_;
   uint64_t counter0 = counter_;
 
+#ifdef __MINGW64__
+  __p_sig_fn_t oldAction = nullptr;
+  __p_sig_fn_t newAction = keyboardInterruptHandler;
+
+  userOk = true;
+  oldAction = signal(SIGINT, newAction);
+
+  bool success = untilAddress(address, traceFile);
+
+  signal(SIGINT, oldAction);
+#else
   struct sigaction oldAction;
   struct sigaction newAction;
   memset(&newAction, 0, sizeof(newAction));
@@ -2706,6 +2758,7 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   bool success = untilAddress(address, traceFile);
 
   sigaction(SIGINT, &oldAction, nullptr);
+#endif
 
   if (counter_ == limit)
     std::cerr << "Stopped -- Reached instruction limit\n";
@@ -2821,6 +2874,17 @@ Core<URV>::run(FILE* file)
   struct timeval t0;
   gettimeofday(&t0, nullptr);
 
+#ifdef __MINGW64__
+  __p_sig_fn_t oldAction = nullptr;
+  __p_sig_fn_t newAction = keyboardInterruptHandler;
+
+  userOk = true;
+  oldAction = signal(SIGINT, newAction);
+
+  bool success = simpleRun();
+
+  signal(SIGINT, oldAction);
+#else
   struct sigaction oldAction;
   struct sigaction newAction;
   memset(&newAction, 0, sizeof(newAction));
@@ -2832,6 +2896,7 @@ Core<URV>::run(FILE* file)
   bool success = simpleRun();
 
   sigaction(SIGINT, &oldAction, nullptr);
+#endif
 
   // Simulator stats.
   struct timeval t1;
@@ -7288,6 +7353,16 @@ copyStatBufferToRiscv(const struct stat& buff, void* rvBuff)
 #ifdef __APPLE__
   // TODO: adapt code for Mac OS.
   ptr += 40;
+#elif defined __MINGW64__
+  /* *((uint32_t*) ptr) = buff.st_blksize; */   ptr += 4;
+  /* __pad2 */                                  ptr += 4;
+  /* *((uint64_t*) ptr) = buff.st_blocks; */    ptr += 8;
+  *((uint32_t*) ptr) = buff.st_atime;           ptr += 4;
+  *((uint32_t*) ptr) = 0;                       ptr += 4;
+  *((uint32_t*) ptr) = buff.st_mtime;           ptr += 4;
+  *((uint32_t*) ptr) = 0;                       ptr += 4;
+  *((uint32_t*) ptr) = buff.st_ctime;           ptr += 4;
+  *((uint32_t*) ptr) = 0;                       ptr += 4;
 #else
   *((uint32_t*) ptr) = buff.st_blksize;         ptr += 4;
   /* __pad2 */                                  ptr += 4;
@@ -7311,11 +7386,16 @@ Core<URV>::emulateNewlib()
   URV a0 = intRegs_.read(RegA0);
   URV a1 = intRegs_.read(RegA1);
   URV a2 = intRegs_.read(RegA2);
+
+#ifndef __MINGW64__
   URV a3 = intRegs_.read(RegA3);
+#endif
+
   URV num = intRegs_.read(RegA7);
 
   switch (num)
     {
+#ifndef __MINGW64__
     case 56:       // openat
       {
 	int dirfd = a0;
@@ -7332,6 +7412,15 @@ Core<URV>::emulateNewlib()
 
 	mode_t mode = a3;
 	int rc = openat(dirfd, path, x86Flags, mode);
+	return SRV(rc);
+      }
+
+    case 62:       // lseek
+      {
+	int fd = a0;
+	size_t offset = a1;
+	int whence = a2;
+	int rc = lseek(fd, offset, whence);
 	return SRV(rc);
       }
 
@@ -7410,6 +7499,7 @@ Core<URV>::emulateNewlib()
 	copyStatBufferToRiscv(buff, (void*) rvBuff);
 	return rv;
       }
+#endif
 
     case 80:       // fstat
       {
@@ -7463,6 +7553,12 @@ Core<URV>::emulateNewlib()
 	  return SRV(-1);
 	size_t count = a2;
 	auto rv = write(fd, (void*) buffAddr, count);
+	if (rv < 0)
+	  {
+	    char buffer[512];
+	    char* p = strerror_r(errno, buffer, 512);
+	    std::cerr << p << '\n';
+	  }
 	return URV(rv);
       }
 
@@ -7478,6 +7574,7 @@ Core<URV>::emulateNewlib()
 	return 0;
       }
 
+#ifndef __MINGW64__
     case 160: // uname
       {
 	// Assumes that x86 and rv Linux have same layout for struct utsname.
@@ -7513,6 +7610,7 @@ Core<URV>::emulateNewlib()
 	SRV rv = getegid();
 	return rv;
       }
+#endif
 
     case 1024: // open
       {
@@ -7522,6 +7620,7 @@ Core<URV>::emulateNewlib()
 	int flags = a1;
 	int x86Flags = 0;
 	if (flags & 1) x86Flags |= O_WRONLY;
+	if (flags & 0x2) x86Flags |= O_RDWR;
 	if (flags & 0x200) x86Flags |= O_CREAT;
 	int mode = a2;
 	SRV fd = open((const char*) pathAddr, x86Flags, mode);
@@ -7891,10 +7990,30 @@ Core<URV>::execWfi(uint32_t, uint32_t, int32_t)
 
 
 template <typename URV>
-void
-Core<URV>::commitCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
-			  URV intRegVal)
+bool
+Core<URV>::doCsrRead(CsrNumber csr, URV& value)
 {
+  if (csRegs_.read(csr, privMode_, debugMode_, value))
+    return true;
+
+  illegalInst();
+  csrException_ = true;
+  return false;
+}
+
+
+template <typename URV>
+void
+Core<URV>::doCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
+		      URV intRegVal)
+{
+  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
+    {
+      illegalInst();
+      csrException_ = true;
+      return;
+    }
+
   // Make auto-increment happen before write for minstret and cycle.
   if (csr == CsrNumber::MINSTRET or csr == CsrNumber::MINSTRETH)
     retiredInsts_++;
@@ -7942,23 +8061,12 @@ Core<URV>::execCsrrw(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = intRegs_.read(rs1);
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -7972,12 +8080,8 @@ Core<URV>::execCsrrs(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev | intRegs_.read(rs1);
   if (rs1 == 0)
@@ -7986,14 +8090,7 @@ Core<URV>::execCsrrs(uint32_t rd, uint32_t rs1, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8007,12 +8104,8 @@ Core<URV>::execCsrrc(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev & (~ intRegs_.read(rs1));
   if (rs1 == 0)
@@ -8021,14 +8114,7 @@ Core<URV>::execCsrrc(uint32_t rd, uint32_t rs1, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8042,21 +8128,11 @@ Core<URV>::execCsrrwi(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (rd != 0 and not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
+  if (rd != 0)
+    if (not doCsrRead(csr, prev))
       return;
-    }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, imm, rd, prev);
+  doCsrWrite(csr, imm, rd, prev);
 }
 
 
@@ -8070,12 +8146,8 @@ Core<URV>::execCsrrsi(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev | imm;
   if (imm == 0)
@@ -8084,14 +8156,7 @@ Core<URV>::execCsrrsi(uint32_t rd, uint32_t imm, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8105,12 +8170,8 @@ Core<URV>::execCsrrci(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev & (~ imm);
   if (imm == 0)
@@ -8119,14 +8180,7 @@ Core<URV>::execCsrrci(uint32_t rd, uint32_t imm, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8323,9 +8377,8 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMul(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));  // sign extend to 64-bit
-    boost::multiprecision::int128_t b = int64_t(intRegs_.read(rs2));
+    Int128 a = int64_t(intRegs_.read(rs1));  // sign extend to 64-bit
+    Int128 b = int64_t(intRegs_.read(rs2));
 
     int64_t c = static_cast<int64_t>(a * b);
     intRegs_.write(rd, c);
@@ -8336,10 +8389,9 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMulh(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));  // sign extend.
-    boost::multiprecision::int128_t b = int64_t(intRegs_.read(rs2));
-    boost::multiprecision::int128_t c = a * b;
+    Int128 a = int64_t(intRegs_.read(rs1));  // sign extend.
+    Int128 b = int64_t(intRegs_.read(rs2));
+    Int128 c = a * b;
     int64_t high = static_cast<int64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -8351,9 +8403,9 @@ namespace WdRiscv
   Core<uint64_t>::execMulhsu(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
 
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));
-    boost::multiprecision::uint128_t b = intRegs_.read(rs2);
-    boost::multiprecision::int128_t c = a * b;
+    Int128 a = int64_t(intRegs_.read(rs1));
+    Int128 b = intRegs_.read(rs2);
+    Int128 c = a * b;
     int64_t high = static_cast<int64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -8364,9 +8416,9 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMulhu(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-    boost::multiprecision::uint128_t a = intRegs_.read(rs1);
-    boost::multiprecision::uint128_t b = intRegs_.read(rs2);
-    boost::multiprecision::uint128_t c = a * b;
+    Uint128 a = intRegs_.read(rs1);
+    Uint128 b = intRegs_.read(rs2);
+    Uint128 c = a * b;
     uint64_t high = static_cast<uint64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -10666,54 +10718,6 @@ Core<uint64_t>::execFmv_x_d(uint32_t rd, uint32_t rs1, int32_t)
 
 
 template <typename URV>
-void
-Core<URV>::execAmoadd_w(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad32(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      // Sign extend least significant word of register value.
-      SRV rdVal = SRV(int32_t(loadedValue));
-
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val + rdVal;
-
-      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::execAmoswap_w(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad32(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      // Sign extend least significant word of register value.
-      SRV rdVal = SRV(int32_t(loadedValue));
-
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val;
-
-      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
 template <typename LOAD_TYPE>
 void
 Core<URV>::loadReserve(uint32_t rd, uint32_t rs1)
@@ -10899,8 +10903,68 @@ Core<URV>::execSc_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 
 template <typename URV>
 void
+Core<URV>::execAmoadd_w(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad32(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      // Sign extend least significant word of register value.
+      SRV rdVal = SRV(int32_t(loadedValue));
+
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val + rdVal;
+
+      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
+Core<URV>::execAmoswap_w(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad32(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      // Sign extend least significant word of register value.
+      SRV rdVal = SRV(int32_t(loadedValue));
+
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val;
+
+      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
 Core<URV>::execAmoxor_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -10925,6 +10989,10 @@ template <typename URV>
 void
 Core<URV>::execAmoor_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -10949,6 +11017,10 @@ template <typename URV>
 void
 Core<URV>::execAmoand_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -10973,6 +11045,10 @@ template <typename URV>
 void
 Core<URV>::execAmomin_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
 
@@ -10998,6 +11074,10 @@ template <typename URV>
 void
 Core<URV>::execAmominu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11024,6 +11104,10 @@ template <typename URV>
 void
 Core<URV>::execAmomax_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11048,6 +11132,10 @@ template <typename URV>
 void
 Core<URV>::execAmomaxu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11064,50 +11152,6 @@ Core<URV>::execAmomaxu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
       URV result = (w1 > w2)? w1 : w2;
 
       bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::execAmoadd_d(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad64(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      URV rdVal = loadedValue;
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val + rdVal;
-
-      bool storeOk = store<uint32_t>(addr, addr, result);
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::execAmoswap_d(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad64(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      URV rdVal = loadedValue;
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val;
-
-      bool storeOk = store<URV>(addr, addr, result);
 
       if (storeOk and not triggerTripped_)
 	intRegs_.write(rd, rdVal);
@@ -11151,8 +11195,64 @@ Core<URV>::execSc_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 
 template <typename URV>
 void
+Core<URV>::execAmoadd_d(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad64(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      URV rdVal = loadedValue;
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val + rdVal;
+
+      bool storeOk = store<uint32_t>(addr, addr, result);
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
+Core<URV>::execAmoswap_d(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad64(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      URV rdVal = loadedValue;
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val;
+
+      bool storeOk = store<URV>(addr, addr, result);
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
 Core<URV>::execAmoxor_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11175,6 +11275,10 @@ template <typename URV>
 void
 Core<URV>::execAmoor_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11197,6 +11301,10 @@ template <typename URV>
 void
 Core<URV>::execAmoand_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11219,6 +11327,10 @@ template <typename URV>
 void
 Core<URV>::execAmomin_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11241,6 +11353,10 @@ template <typename URV>
 void
 Core<URV>::execAmominu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11263,6 +11379,10 @@ template <typename URV>
 void
 Core<URV>::execAmomax_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11285,6 +11405,10 @@ template <typename URV>
 void
 Core<URV>::execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)

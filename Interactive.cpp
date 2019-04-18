@@ -24,7 +24,7 @@
 #include <boost/format.hpp>
 #include <boost/algorithm/string.hpp>
 #include "Interactive.hpp"
-#include "linenoise.h"
+#include "linenoise.hpp"
 
 using namespace WdRiscv;
 
@@ -702,13 +702,6 @@ Interactive<URV>::disassCommand(Core<URV>& core, const std::string& line,
 }
 
 
-template<typename URV>
-extern
-bool
-loadElfFile(Core<URV>& core, const std::string& filePath);
-
-
-
 template <typename URV>
 bool
 Interactive<URV>::elfCommand(Core<URV>& core, const std::string& line,
@@ -721,8 +714,34 @@ Interactive<URV>::elfCommand(Core<URV>& core, const std::string& line,
       return false;
     }
 
-  std::string fileName = tokens.at(1);
-  return loadElfFile(core, fileName);
+  std::string filePath = tokens.at(1);
+
+  size_t entryPoint = 0, exitPoint = 0;
+
+  if (not core.loadElfFile(filePath, entryPoint, exitPoint))
+    return false;
+
+  core.pokePc(URV(entryPoint));
+
+  if (exitPoint)
+    core.setStopAddress(URV(exitPoint));
+
+  ElfSymbol sym;
+  if (core.findElfSymbol("tohost", sym))
+    core.setToHostAddress(sym.addr_);
+
+  if (core.findElfSymbol("__whisper_console_io", sym))
+    core.setConsoleIo(URV(sym.addr_));
+
+  if (core.findElfSymbol("__global_pointer$", sym))
+    core.pokeIntReg(RegGp, URV(sym.addr_));
+
+  if (core.findElfSymbol("_end", sym))   // For newlib emulation.
+    core.setTargetProgramBreak(URV(sym.addr_));
+  else
+    core.setTargetProgramBreak(URV(exitPoint));
+
+  return true;
 }
 
 
@@ -1493,7 +1512,7 @@ template <typename URV>
 bool
 Interactive<URV>::interact(FILE* traceFile, FILE* commandLog)
 {
-  linenoiseHistorySetMaxLen(1024);
+  linenoise::SetHistoryMaxLen(1024);
 
   uint64_t errors = 0;
   unsigned currentHartId = 0;
@@ -1505,17 +1524,16 @@ Interactive<URV>::interact(FILE* traceFile, FILE* commandLog)
   while (not done)
     {
       errno = 0;
-      char* cline = linenoise("whisper> ");
-      if (cline == nullptr)
+      std::string line = linenoise::Readline("whisper> ");
+
+      if (line.empty())
 	{
 	  if (errno == EAGAIN)
 	    continue;
 	  return true;
 	}
 
-      std::string line = cline;
-      linenoiseHistoryAdd(cline);
-      free(cline);
+      linenoise::AddHistory(line.c_str());
 
       if (not executeLine(currentHartId, line, traceFile, commandLog,
 			  replayStream, done))
