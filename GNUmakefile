@@ -1,6 +1,6 @@
 INSTALL_DIR := .
 
-PROJECT := whisper
+PROJECT := isscompare
 
 # For Static Linking to Boost Library
 # STATIC_LINK := 1
@@ -58,7 +58,7 @@ OFLAGS := -O3
 IFLAGS := $(addprefix -I,$(BOOST_INC)) -I.
 
 # Command to compile .cpp files.
-override CXXFLAGS += -MMD -MP -std=c++17 $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra
+override CXXFLAGS += -MMD -MP -std=c++17 $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra -m32 -shared
 # Command to compile .c files
 override CFLAGS += -MMD -MP $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra
 
@@ -73,10 +73,10 @@ $(BUILD_DIR)/%.c.o:  %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Main target.(only linking)
-$(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/whisper.cpp.o \
+$(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/ISSCompare.cpp.o \
                          $(BUILD_DIR)/linenoise.c.o \
                          $(BUILD_DIR)/librvcore.a
-	$(CXX) -o $@ $^ $(LINK_DIRS) $(LINK_LIBS)
+	$(CXX) -o $@.so $^ $(LINK_DIRS) $(LINK_LIBS)
 
 # List of all CPP sources needed for librvcore.a
 RVCORE_SRCS := IntRegs.cpp CsRegs.cpp instforms.cpp \
@@ -85,7 +85,7 @@ RVCORE_SRCS := IntRegs.cpp CsRegs.cpp instforms.cpp \
             Server.cpp Interactive.cpp
 
 # List of All CPP Sources for the project
-SRCS_CXX += $(RVCORE_SRCS) whisper.cpp
+SRCS_CXX += $(RVCORE_SRCS) ISSCompare.cpp
 
 # List of All C Sources for the project
 SRCS_C := linenoise.c

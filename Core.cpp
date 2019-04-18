@@ -1879,28 +1879,23 @@ formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
     {
       if (resource == 'r')
 	{
-	  fprintf(out, "#%ld %d %08x %8s r %02x         %08x  %s",
-		  tag, hartId, currPc, opcode, addr, value, assembly);
+	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
 	}
       else if (resource == 'c')
 	{
 	  if ((addr >> 16) == 0)
-	    fprintf(out, "#%ld %d %08x %8s c %04x       %08x  %s",
-		    tag, hartId, currPc, opcode, addr, value, assembly);
+	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
 	  else
-	    fprintf(out, "#%ld %d %08x %8s c %08x   %08x  %s",
-		    tag, hartId, currPc, opcode, addr, value, assembly);
+	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
 	}
       else
 	{
-	  fprintf(out, "#%ld %d %08x %8s %c %08x   %08x  %s", tag, hartId,
-		  currPc, opcode, resource, addr, value, assembly);
+	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
 	}
     }
   else
     {
-      fprintf(out, "#%ld %d %016lx %8s %c %016lx %016lx  %s",
-	      tag, hartId, currPc, opcode, resource, addr, value, assembly);
+	  fprintf(out, " %08x %8s r %02x         %08x  %s",currPc, opcode, addr, value, assembly);
     }
 }
 
@@ -1938,14 +1933,14 @@ Core<URV>::printInstTrace(uint32_t inst, uint64_t tag, std::string& tmp,
     }
 
   char instBuff[128];
-  if ((inst & 0x3) == 3)
-    sprintf(instBuff, "%08x", inst);
+  if ((inst & 0x3) == 3) {}
+    //sprintf(instBuff, "%08x", inst);
   else
     {
       // 2-byte instruction: Clear top 16 bits
       uint16_t low = uint16_t(inst);
       inst = low;
-      sprintf(instBuff, "%04x", inst);
+      //sprintf(instBuff, "%04x", inst);
     }
 
   bool pending = false;  // True if a printed line need to be terminated.
