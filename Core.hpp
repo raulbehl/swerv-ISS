@@ -58,7 +58,7 @@ namespace WdRiscv
     uint64_t value() const
     { return val_; }
 
-  private:
+  public:
     Type type_ = Stop;
     const char* msg_ = "";
     uint64_t addr_ = 0;
@@ -1284,7 +1284,7 @@ namespace WdRiscv
     void execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2);
 
 
-  private:
+  public:
 
     // We model store buffer in order to undo store effects after an
     // imprecise store exception.
@@ -1333,7 +1333,7 @@ namespace WdRiscv
     void putInStoreQueue(unsigned size, size_t addr, uint64_t newData,
 			 uint64_t prevData);
 
-  private:
+  public:
 
     unsigned hartId_ = 0;        // Hardware thread id.
     Memory& memory_;

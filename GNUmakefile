@@ -1,6 +1,6 @@
 INSTALL_DIR := .
 
-PROJECT := whisper
+PROJECT := isscompare
 
 # For Static Linking to Boost Library
 # STATIC_LINK := 1
@@ -8,7 +8,7 @@ PROJECT := whisper
 # STATIC_LINK := 0
 # or
 # make STATIC_LINK=0
-STATIC_LINK := 1
+STATIC_LINK := 0
 
 # For non-default compiler toolchain uncomment and change the following variables
 #CC := gcc-8
@@ -34,6 +34,9 @@ BOOST_LIBS := boost_program_options \
 
 # Add extra dependency libraries here
 EXTRA_LIBS := -lpthread
+ifeq (mingw,$(findstring mingw,$(shell $(CXX) -v 2>&1 | grep Target | cut -d' ' -f2)))
+EXTRA_LIBS += -lws2_32
+endif
 
 # Add External Library location paths here
 LINK_DIRS := $(addprefix -L,$(BOOST_LIB_DIR))
@@ -48,7 +51,7 @@ else
 endif
 
 # For out of source build
-BUILD_DIR := build
+BUILD_DIR := build-$(shell uname -s)
 MKDIR_P ?= mkdir -p
 RM := rm -rf
 # Optimization flags.  Use -g for debug.
@@ -58,9 +61,9 @@ OFLAGS := -O3
 IFLAGS := $(addprefix -I,$(BOOST_INC)) -I.
 
 # Command to compile .cpp files.
-override CXXFLAGS += -MMD -MP -std=c++17 $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra
+override CXXFLAGS += -MMD -MP -std=c++14 $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra -m32 -shared -fPIC -Wl,--export-dynamic -Bsymbolic
 # Command to compile .c files
-override CFLAGS += -MMD -MP $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra
+override CFLAGS += -MMD -MP $(OFLAGS) $(IFLAGS) -pedantic -Wall -Wextra -m32 -shared -fPIC -Bsymbolic -Wl,--export-dynamic -Bsymbolic
 
 # Rule to make a .o from a .cpp file.
 $(BUILD_DIR)/%.cpp.o:  %.cpp
@@ -73,10 +76,10 @@ $(BUILD_DIR)/%.c.o:  %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Main target.(only linking)
-$(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/whisper.cpp.o \
+$(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/ISSCompare.cpp.o \
                          $(BUILD_DIR)/linenoise.c.o \
                          $(BUILD_DIR)/librvcore.a
-	$(CXX) -o $@ $^ $(LINK_DIRS) $(LINK_LIBS)
+	$(CXX) -o $@.so $^ $(LINK_DIRS) $(LINK_LIBS) -lz -lm -shared -static-libstdc++ -Wl,--export-dynamic -Bsymbolic
 
 # List of all CPP sources needed for librvcore.a
 RVCORE_SRCS := IntRegs.cpp CsRegs.cpp instforms.cpp \
@@ -85,10 +88,10 @@ RVCORE_SRCS := IntRegs.cpp CsRegs.cpp instforms.cpp \
             Server.cpp Interactive.cpp
 
 # List of All CPP Sources for the project
-SRCS_CXX += $(RVCORE_SRCS) whisper.cpp
+SRCS_CXX += $(RVCORE_SRCS) ISSCompare.cpp
 
 # List of All C Sources for the project
-SRCS_C := linenoise.c
+SRCS_C := linenoise.c dpi.c
 
 # List of all object files for the project
 OBJS_GEN := $(SRCS_CXX:%=$(BUILD_DIR)/%.o) $(SRCS_C:%=$(BUILD_DIR)/%.o)
@@ -118,6 +121,10 @@ help:
 	@echo "Possible targets: $(BUILD_DIR)/$(PROJECT) install clean"
 	@echo "To compile for debug: make OFLAGS=-g"
 	@echo "To install: make INSTALL_DIR=<target> install"
+	@echo "To browse source code: make cscope"
 
-.PHONY: install clean help
+cscope:
+	( find . \( -name \*.cpp -or -name \*.hpp -or -name \*.c -or -name \*.h \) -print | xargs cscope -b ) && cscope -d && $(RM) cscope.out
+
+.PHONY: install clean help cscope
 
