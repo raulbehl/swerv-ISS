@@ -1879,17 +1879,17 @@ formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
     {
       if (resource == 'r')
 	{
-	  fprintf(out, "#%ld %d %08x %8s r %02x         %08x  %s",
-		  tag, hartId, currPc, opcode, addr, value, assembly);
+	  fprintf(out, "#%08x %8s r %02x         %08x  %s",
+		  currPc, opcode, addr, value, assembly);
 	}
       else if (resource == 'c')
 	{
 	  if ((addr >> 16) == 0)
-	    fprintf(out, "#%ld %d %08x %8s c %04x       %08x  %s",
-		    tag, hartId, currPc, opcode, addr, value, assembly);
+	    fprintf(out, "#%08x %8s c %04x       %08x  %s",
+		    currPc, opcode, addr, value, assembly);
 	  else
-	    fprintf(out, "#%ld %d %08x %8s c %08x   %08x  %s",
-		    tag, hartId, currPc, opcode, addr, value, assembly);
+	    fprintf(out, "#%08x %8s c %08x   %08x  %s",
+		    currPc, opcode, addr, value, assembly);
 	}
       else
 	{
@@ -1899,8 +1899,8 @@ formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
     }
   else
     {
-      fprintf(out, "#%ld %d %016lx %8s %c %016lx %016lx  %s",
-	      tag, hartId, currPc, opcode, resource, addr, value, assembly);
+      fprintf(out, "#%016lx %8s %c %016lx %016lx  %s",
+	      currPc, opcode, resource, addr, value, assembly);
     }
 }
 
