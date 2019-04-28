@@ -324,27 +324,35 @@ void compareExec (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
   fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
   // Decode the instruction
   const InstInfo info = core<uint32_t>.decode(inst, op0, op1, op2);
+  // Compare RD register and the value if written/read
   if (info.ithOperandMode(0) != OperandMode::None) {
     compareRD (spirit_rd_addr, spirit_rd_wdata, op0);
   }
+  // Compare RS1 register and the value if written/read
   if (info.ithOperandMode(1) != OperandMode::None) {
     compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1);
   }
+  // Compare RS2 register and the value if written/read
   if ((info.ithOperandMode(2) != OperandMode::None) &&
       (info.ithOperandType(2) != OperandType::Imm)) {
     compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2);
   }
 }
 
+// run() is called by spirit top testbench whenever an instruction
+// retires. Use the spirit interface to get the current RTL state.
 extern "C" 
 void run (uint32_t spirit_rd_addr,  uint32_t spirit_rd_wdata, 
                  uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
                  uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata) {
 
+  // Execute the ISS model for one cycle
   core<uint32_t>.singleStep(stdout);
+  // Compare both the RTL and ISS execution posts execution
   compareExec (spirit_rd_addr, spirit_rd_wdata, 
                spirit_rs1_addr, spirit_rs1_rdata,
                spirit_rs2_addr, spirit_rs2_rdata);
+  // singleStep updates the PC. Use prevPC for comparison/decode
   prevPC = core<uint32_t>.pc_;
   return;
 }
