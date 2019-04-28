@@ -762,7 +762,7 @@ namespace WdRiscv
     void setEaCompatibleWithBase(bool flag)
     { eaCompatWithBase_ = flag; }
 
-  protected:
+  public:
 
     /// Helper to run method: Run until toHost is written or until
     /// exit is called.
