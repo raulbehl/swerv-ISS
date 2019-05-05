@@ -82,7 +82,7 @@ $(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/ISSCompare.cpp.o \
 	$(CXX) -o $@.so $^ $(LINK_DIRS) $(LINK_LIBS) -lz -lm -shared -static-libstdc++ -Wl,--export-dynamic -Bsymbolic
 
 # List of all CPP sources needed for librvcore.a
-RVCORE_SRCS := IntRegs.cpp CsRegs.cpp instforms.cpp \
+RVCORE_SRCS := IntRegs.cpp CstRegs.cpp CsRegs.cpp instforms.cpp \
             Memory.cpp Core.cpp InstInfo.cpp Triggers.cpp \
             PerfRegs.cpp gdb.cpp CoreConfig.cpp \
             Server.cpp Interactive.cpp

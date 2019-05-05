@@ -143,6 +143,7 @@ bool
 Memory::loadHexFile(const std::string& fileName)
 {
   std::ifstream input(fileName);
+  bool read4Bytes = false;
 
   if (not input.good())
     {
@@ -191,13 +192,22 @@ Memory::loadHexFile(const std::string& fileName)
 	      errors++;
 	      break;
 	    }
-	  if (value > 0xff)
+	  if (value > 0xff || read4Bytes)
 	    {
-	      std::cerr << "File " << fileName << ", Line " << lineNum << ": "
-			<< "Invalid value: " << std::hex << value << '\n';
-	      errors++;
+        read4Bytes = true;
+        // Convert it into set of bytes
+        for (auto i=0; i<4; i++) {
+          uint32_t bvalue = value >> (8*i);
+          if (address < size_) {
+            if (not errors) {
+              if (data_[address] != 0)
+                overwrites++;
+              data_[address++] = bvalue & 0xff;
+            }
+          }
+        }
 	    }
-	  if (address < size_)
+	  else if (address < size_)
 	    {
 	      if (not errors)
 		{

@@ -14,21 +14,27 @@
 #include "Core.hpp"
 #include "Interactive.hpp"
 #include "Server.hpp"
+#include "instforms.hpp"
 #include "dpi.h"
 
 typedef std::vector<std::string> StringVec;
 
 using namespace WdRiscv;
 
-size_t memorySize = size_t(1) << 31;  // 2 gigs
+size_t memorySize = 0x90000000;  // 2 gigs
 
-unsigned registerCount = 32;
-unsigned hartId = 0;
-unsigned prevPC = 0;
+unsigned  registerCount = 32;
+unsigned  hartId = 0;
+unsigned  prevPC = 0;
+uint32_t  inst= 0;
+uint32_t  op0 = 0;
+uint32_t  op1 = 0;
+int32_t   op2 = 0;
 
 WdRiscv::Memory memory(memorySize);
 template <typename XLEN>
 WdRiscv::Core<XLEN> core(hartId, memory, registerCount);
+WdRiscv::InstInfo info;
 
 // Hold values provided on the command line.
 struct Args
@@ -56,7 +62,7 @@ struct Args
   uint64_t toHost = 0;
   uint64_t consoleIo = 0;
   uint64_t instCountLim = ~uint64_t(0);
-  
+
   unsigned regWidth = 32;
 
   bool help = false;
@@ -231,7 +237,7 @@ bool ISSinit(bool filetype, std::string filename) {
   prevPC = core<uint32_t>.pc_;
 }
 
-extern int main (int argc, char* argv)  {
+extern int issInit (int argc, char* argv)  {
 
   unsigned regWidth = 32;
   bool ok = true;
@@ -255,105 +261,219 @@ extern int main (int argc, char* argv)  {
   return ok? 0 : 1;
 }
 
-void compareRD (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata, uint32_t iss_rd_addr) {
+bool compareRD (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata, uint32_t iss_rd_addr) {
   uint32_t iss_rd_wdata;
 
   iss_rd_wdata = core<uint32_t>.intRegs_.read(iss_rd_addr);
 
   if (spirit_rd_addr != iss_rd_addr) {
-    printf ("Unexpected R%-.2d Register\n", spirit_rd_addr);
-    printf ("Expecting  R%-.2d Register\n", iss_rd_addr);
-    return;
+    fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rd_addr);
+    fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rd_addr);
+    return false;
   }
   else if (spirit_rd_wdata != iss_rd_wdata) {
-    printf ("RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rd_addr, spirit_rd_wdata,
+    fprintf (stdout, "RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rd_addr, spirit_rd_wdata,
                                                        iss_rd_addr, iss_rd_wdata);
-    printf ("RD Value Mismatch\n");
-    return;
+    fprintf (stdout, "RD Value Mismatch\n");
+    return false;
   }
+  return true;
 }
 
-void compareRS1 (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata, uint32_t iss_rs1_addr) {
+bool compareRS1 (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata, uint32_t iss_rs1_addr) {
   uint32_t iss_rs1_rdata;
 
-  iss_rs1_rdata = core<uint32_t>.intRegs_.read(iss_rs1_addr);
+  iss_rs1_rdata = (core<uint32_t>.intRegs_.lastWrittenReg_==iss_rs1_addr) ? 
+                       core<uint32_t>.intRegs_.originalValue_ :
+                       core<uint32_t>.intRegs_.read(iss_rs1_addr);
 
   if (spirit_rs1_addr != iss_rs1_addr) {
-    printf ("Unexpected R%-.2d Register\n", spirit_rs1_addr);
-    printf ("Expecting  R%-.2d Register\n", iss_rs1_addr);
-    return;
+    fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rs1_addr);
+    fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rs1_addr);
+    return false;
   }
   else if (spirit_rs1_rdata != iss_rs1_rdata) {
-    printf ("RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rs1_addr, spirit_rs1_rdata,
+    fprintf (stdout, "RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rs1_addr, spirit_rs1_rdata,
                                                        iss_rs1_addr, iss_rs1_rdata);
-    printf ("RS1 Value Mismatch\n");
-    return;
+    fprintf (stdout, "RS1 Value Mismatch\n");
+    return false;
   }
+  return true;
 }
 
-void compareRS2 (uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata, uint32_t iss_rs2_addr) {
+bool compareRS2 (uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata, uint32_t iss_rs2_addr) {
   uint32_t iss_rs2_rdata;
 
-  iss_rs2_rdata = core<uint32_t>.intRegs_.read(iss_rs2_addr);
+  iss_rs2_rdata = (core<uint32_t>.intRegs_.lastWrittenReg_==iss_rs2_addr) ? 
+                       core<uint32_t>.intRegs_.originalValue_ :
+                       core<uint32_t>.intRegs_.read(iss_rs2_addr);
 
   if (spirit_rs2_addr != iss_rs2_addr) {
-    printf ("Unexpected R%-.2d Register\n", spirit_rs2_addr);
-    printf ("Expecting  R%-.2d Register\n", iss_rs2_addr);
-    return;
+    fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rs2_addr);
+    fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rs2_addr);
+    return false;
   }
   else if (spirit_rs2_rdata != iss_rs2_rdata) {
-    printf ("RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rs2_addr, spirit_rs2_rdata,
+    fprintf (stdout, "RTL R%-.2d: %-.8x\t ISS R%-.2d: %-.8x\n", spirit_rs2_addr, spirit_rs2_rdata,
                                                        iss_rs2_addr, iss_rs2_rdata);
-    printf ("RS2 Value Mismatch\n");
-    return;
+    fprintf (stdout, "RS2 Value Mismatch\n");
+    return false;
   }
+  return true;
 }
 
-void compareExec (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
-                  uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
-                  uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata) {
+extern "C"
+void issDecode () {
 
-  uint32_t inst= 0;
-  uint32_t op0 = 0;
-  uint32_t op1 = 0;
-  int32_t  op2 = 0;
-  
   bool fetchOK = true;
-
   // Get the instruction at Current PC
   fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
   // Decode the instruction
-  const InstInfo info = core<uint32_t>.decode(inst, op0, op1, op2);
+  info = core<uint32_t>.decode(inst, op0, op1, op2);
+  return;
+}
+
+extern "C"
+int issCompareInst (uint32_t spirit_pc_rdata, uint32_t spirit_inst) {
+
+  bool fetchOK = true;
+  fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
+  // Decode the instruction
+  info = core<uint32_t>.decode(inst, op0, op1, op2);
+
+  if (prevPC != spirit_pc_rdata) {
+      fprintf (stdout, "RTL PC: %-.8x\t ISS PC: %-.8x\n", spirit_pc_rdata, prevPC);
+      fprintf (stdout, "PC Mismatch\n");
+      return 0;
+  }
+  else { 
+    if (isCompressedInst(inst)) inst = inst&0xFFFF;
+    if (inst != spirit_inst) {
+      fprintf (stdout, "RTL INSTR: %-.8x\t ISS INSTR: %-.8x\n", spirit_inst, inst);
+      fprintf (stdout, "Instruction Word Mismatch\n");
+      return 0;
+    }
+  }
+  return 1;
+}
+
+extern "C"
+int issCompareR (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
+                 uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
+                 uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata) {
+
   // Compare RD register and the value if written/read
   if (info.ithOperandMode(0) != OperandMode::None) {
-    compareRD (spirit_rd_addr, spirit_rd_wdata, op0);
+    if (!(compareRD (spirit_rd_addr, spirit_rd_wdata, op0)))
+      return 0;
   }
   // Compare RS1 register and the value if written/read
   if (info.ithOperandMode(1) != OperandMode::None) {
-    compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1);
+    if (!(compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1)))
+      return 0;
   }
   // Compare RS2 register and the value if written/read
   if ((info.ithOperandMode(2) != OperandMode::None) &&
       (info.ithOperandType(2) != OperandType::Imm)) {
-    compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2);
+    if(!(compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2)))
+      return 0;
   }
+  return 1;
 }
 
-// run() is called by spirit top testbench whenever an instruction
-// retires. Use the spirit interface to get the current RTL state.
-extern "C" 
-void run (uint32_t spirit_rd_addr,  uint32_t spirit_rd_wdata, 
-                 uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
-                 uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata) {
+extern "C"
+int issCompareI (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
+                 uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata) {
 
-  // Execute the ISS model for one cycle
-  core<uint32_t>.singleStep(stdout);
-  // Compare both the RTL and ISS execution posts execution
-  compareExec (spirit_rd_addr, spirit_rd_wdata, 
-               spirit_rs1_addr, spirit_rs1_rdata,
-               spirit_rs2_addr, spirit_rs2_rdata);
+  //printf("Comparing I-type\n");
+  //printf("[RTL] RD: X[%-.2x]:%-.8x\n", spirit_rd_addr, spirit_rd_wdata);
+  //printf("[ISS] RD: X[%-.2x]:%-.8x\n", op0, core<uint32_t>.intRegs_.read(op0));
+  //printf("[RTL] RS1: X[%-.2x]:%-.8x\n", spirit_rs1_addr, spirit_rs1_rdata);
+  //printf("[ISS] RS1: X[%-.2x]:%-.8x\n", spirit_rs1_addr, spirit_rs1_rdata);
+  // Compare RD register and the value if written/read
+  if (info.ithOperandMode(0) != OperandMode::None) {
+    if (!(compareRD (spirit_rd_addr, spirit_rd_wdata, op0)))
+      return 0;
+  }
+  // Compare RS1 register and the value if written/read
+  if (info.ithOperandMode(1) != OperandMode::None) {
+    if (!(compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1)))
+      return 0;
+  }
+  return 1;
+}
+
+extern "C"
+int issCompareSB (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
+                  uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata) {
+
+  // Compare RS1 register and the value if written/read
+  if (info.ithOperandMode(1) != OperandMode::None) {
+    if (!(compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1)))
+      return 0;
+  }
+  // Compare RS2 register and the value if written/read
+  if ((info.ithOperandMode(2) != OperandMode::None) &&
+      (info.ithOperandType(2) != OperandType::Imm)) {
+    if (!(compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2)))
+      return 0;
+  }
+  return 1;
+}
+
+extern "C"
+int issCompareUJ (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata) {
+
+  // Compare RD register and the value if written/read
+  if (info.ithOperandMode(0) != OperandMode::None) {
+    if (!(compareRD (spirit_rd_addr, spirit_rd_wdata, op0)))
+      return 0;
+  }
+  return 1;
+}
+
+// issExec() is called by spirit top testbench whenever an instruction
+// retires. Use the spirit interface to get the current RTL state.
+extern "C"
+void issExec () {
   // singleStep updates the PC. Use prevPC for comparison/decode
   prevPC = core<uint32_t>.pc_;
+  // Execute the ISS model for one cycle
+  core<uint32_t>.singleStep(stdout);
   return;
 }
 
+extern "C"
+int isRTypeInst () {
+  return core<uint32_t>.isRType ? 1 : 0;
+}
+
+extern "C"
+int isITypeInst () {
+  return core<uint32_t>.isIType ? 1 : 0;
+}
+
+extern "C"
+int isSTypeInst () {
+  return core<uint32_t>.isSType ? 1 : 0;
+}
+
+extern "C"
+int isBTypeInst () {
+  return core<uint32_t>.isBType ? 1 : 0;
+}
+
+extern "C"
+int isUTypeInst () {
+  return core<uint32_t>.isUType ? 1 : 0;
+}
+
+extern "C"
+int isJTypeInst () {
+  return core<uint32_t>.isJType ? 1 : 0;
+}
+
+extern "C"
+void issSetPC (uint32_t pc) {
+  core<uint32_t>.pc_ = pc;
+}

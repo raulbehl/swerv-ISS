@@ -67,7 +67,8 @@ parseNumber(const std::string& numberStr, TYPE& number)
 
 template <typename URV>
 Core<URV>::Core(unsigned hartId, Memory& memory, unsigned intRegCount)
-  : hartId_(hartId), memory_(memory), intRegs_(intRegCount), fpRegs_(32)
+  : hartId_(hartId), memory_(memory), intRegs_(intRegCount), cstRegs_(4),
+    fpRegs_(32)
 {
   regionHasLocalMem_.resize(16);
   regionHasLocalDataMem_.resize(16);
@@ -128,6 +129,7 @@ void
 Core<URV>::reset(bool resetMemoryMappedRegs)
 {
   intRegs_.reset();
+  cstRegs_.reset();
   csRegs_.reset();
 
   // Suppress resetting memory mapped register on initial resets sent
@@ -581,7 +583,48 @@ void
 Core<URV>::execAndi(uint32_t rd, uint32_t rs1, int32_t imm)
 {
   URV v = intRegs_.read(rs1) & SRV(imm);
+  printf ("Value: %-.08x RS1: %-.08x\n", v, intRegs_.read(rs1));
   intRegs_.write(rd, v);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execgetq(uint32_t rd, uint32_t rs1, int32_t rs2) {
+  URV v = cstRegs_.read(rs1);
+  intRegs_.write(rd, v);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execsetq(uint32_t rd, uint32_t rs1, int32_t rs2) {
+  URV v = intRegs_.read(rs1);
+  cstRegs_.write(rd, v);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execretirq(uint32_t rd, uint32_t rs1, int32_t rs2) {
+}
+
+
+template <typename URV>
+void
+Core<URV>::execmaskirq(uint32_t rd, uint32_t rs1, int32_t rs2) {
+}
+
+
+template <typename URV>
+void
+Core<URV>::execwaitirq(uint32_t rd, uint32_t rs1, int32_t rs2) {
+}
+
+
+template <typename URV>
+void
+Core<URV>::exectimer(uint32_t rd, uint32_t rs1, int32_t rs2) {
 }
 
 
@@ -1893,8 +1936,8 @@ formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
 	}
       else
 	{
-	  fprintf(out, "#%ld %d %08x %8s %c %08x   %08x  %s", tag, hartId,
-		  currPc, opcode, resource, addr, value, assembly);
+	  //fprintf(out, "#%08x %8s %c %08x   %08x  %s",
+		//  currPc, opcode, resource, addr, value, assembly);
 	}
     }
   else
@@ -3435,7 +3478,33 @@ Core<URV>::execute32(uint32_t inst)
   }
   return;
 
- l2:
+  // Picorv32 custom instructions
+  l2: {
+    RFormInst rform(inst);
+    unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
+    unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
+    if (funct7 == 0) {
+      execgetq(rd, rs1, rs2);
+    }
+    else if (funct7 == 1) {
+      execsetq(rd, rs1, rs2);
+    }
+    else if (funct7 == 2) {
+      execretirq(rd, rs1, rs2);
+    }
+    else if (funct7 == 3) {
+      execmaskirq(rd, rs1, rs2);
+    }
+    else if (funct7 == 4) {
+      execwaitirq(rd, rs1, rs2);
+    }
+    else if (funct7 == 5) {
+      exectimer(rd, rs1, rs2);
+    }
+    else { illegalInst();}
+  }
+  return;
+
  l7:
   illegalInst();
   return;
@@ -4974,7 +5043,6 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
   return instTable_.getInstInfo(InstId::illegal); // quadrant 3
 }
 
-
 template <typename URV>
 const InstInfo&
 Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
@@ -5007,6 +5075,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l0:  // 00000   I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed(); 
@@ -5027,6 +5096,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l1:
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -5036,13 +5106,47 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
       }
       return instTable_.getInstInfo(InstId::illegal);
 
-    l2:
+    // Picorv32 custom instructions
+    l2: {
+      RFormInst rform(inst);
+      isRType = true;
+      op0 = rform.bits.rd;
+      op1 = rform.bits.rs1;
+      op2 = rform.bits.rs2;
+      unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
+      if (funct7 == 0) {
+        if      (funct3 == 4) return instTable_.getInstInfo(InstId::getq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 1) {
+        if      (funct3 == 2) return instTable_.getInstInfo(InstId::setq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 2) {
+        if      (funct3 == 0) return instTable_.getInstInfo(InstId::retirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 3) {
+        if      (funct3 == 6) return instTable_.getInstInfo(InstId::maskirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 4) {
+        if      (funct3 == 4) return instTable_.getInstInfo(InstId::waitirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 5) {
+        if      (funct3 == 6) return instTable_.getInstInfo(InstId::timer);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      return instTable_.getInstInfo(InstId::illegal);
+    }
     l7:
       return instTable_.getInstInfo(InstId::illegal);
 
     l9:
       {
 	SFormInst sform(inst);
+  isSType = true;
 	op0 = sform.bits.rs1;
 	op1 = sform.bits.rs2;
 	op2 = sform.immed();
@@ -5059,6 +5163,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l16:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -5073,6 +5178,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l17:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -5087,6 +5193,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l18:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -5101,6 +5208,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l19:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -5127,6 +5235,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l3: // 00011  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	unsigned funct3 = iform.fields.funct3;
 	if (iform.fields.rd == 0 and iform.fields.rs1 == 0)
 	  {
@@ -5151,6 +5260,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l4:  // 00100  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -5190,6 +5300,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l5:  // 00101   U-form
       {
 	UFormInst uform(inst);
+  isUType = true;
 	op0 = uform.bits.rd;
 	op1 = uform.immed();
 	return instTable_.getInstInfo(InstId::auipc);
@@ -5199,6 +5310,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l6:  // 00110  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -5227,6 +5339,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l8:  // 01000  S-form
       {
 	SFormInst sform(inst);
+  isSType = true;
 	op0 = sform.bits.rs1;
 	op1 = sform.bits.rs2;
 	op2 = sform.immed();
@@ -5248,6 +5361,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	if (not isRva())
 	  return instTable_.getInstInfo(InstId::illegal);
 	RFormInst rf(inst);
+  isRType = true;
 	uint32_t top5 = rf.top5(), f3 = rf.bits.funct3;
 	op0 = rf.bits.rd; op1 = rf.bits.rs1; op2 = rf.bits.rs2;
 
@@ -5286,6 +5400,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l12:  // 01100  R-form
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd;
 	op1 = rform.bits.rs1;
 	op2 = rform.bits.rs2;
@@ -5324,6 +5439,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l13:  // 01101  U-form
       {
 	UFormInst uform(inst);
+  isUType = true;
 	op0 = uform.bits.rd;
 	op1 = uform.immed();
 	return instTable_.getInstInfo(InstId::lui);
@@ -5332,6 +5448,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l14: // 01110  R-Form
       {
 	const RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd;
 	op1 = rform.bits.rs1;
 	op2 = rform.bits.rs2;
@@ -5361,6 +5478,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l24: // 11000   B-form
       {
 	BFormInst bform(inst);
+  isBType = true;
 	op0 = bform.bits.rs1;
 	op1 = bform.bits.rs2;
 	op2 = bform.immed();
@@ -5377,6 +5495,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l25:  // 11001  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -5388,6 +5507,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l27:  // 11011  J-form
       {
 	JFormInst jform(inst);
+  isJType = true;
 	op0 = jform.bits.rd;
 	op1 = jform.immed();
 	return instTable_.getInstInfo(InstId::jal);
@@ -5396,6 +5516,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l28:  // 11100  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.uimmed(); // csr
@@ -5970,6 +6091,45 @@ Core<URV>::disassembleInst32(uint32_t inst, std::ostream& stream)
 	  stream << "illegal";
       }
       break;
+
+  case 2: {  // 00010  R-form
+	  RFormInst rform(inst);
+	  unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
+	  unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
+	  if (f7 == 0)
+	    {
+	      if      (f3 == 4)  printInstRdRs1Rs2(stream, "getq",  rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else if (f7 == 1)
+	    {
+	      if (f3 == 2)       printInstRdRs1Rs2(stream, "setq",    rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else if (f7 == 2)
+	    {
+	      if (f3 == 2)       printInstRdRs1Rs2(stream, "retirq",    rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else if (f7 == 3)
+	    {
+	      if (f3 == 6)       printInstRdRs1Rs2(stream, "maskirq",    rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else if (f7 == 4)
+	    {
+	      if (f3 == 4)       printInstRdRs1Rs2(stream, "waitirq",    rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else if (f7 == 5)
+	    {
+	      if (f3 == 6)       printInstRdRs1Rs2(stream, "timer",    rd, rs1, rs2);
+	      else               stream << "illegal";
+	    }
+	  else
+	    stream << "illegal";
+  }
+  break;
 
     case 3:  // 00011  I-form
       {
@@ -11303,7 +11463,7 @@ Core<URV>::execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
       bool storeOk = store<URV>(addr, addr, result);
 
       if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
+        intRegs_.write(rd, rdVal);
     }
 }
 

@@ -25,6 +25,7 @@
 #include "InstId.hpp"
 #include "InstInfo.hpp"
 #include "IntRegs.hpp"
+#include "CstRegs.hpp"
 #include "CsRegs.hpp"
 #include "FpRegs.hpp"
 #include "Memory.hpp"
@@ -1283,6 +1284,14 @@ namespace WdRiscv
     void execAmominu_d(uint32_t rd, uint32_t rs1, int32_t rs2);
     void execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2);
 
+    // custom opcodes
+    void execgetq (uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execsetq (uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execretirq (uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execmaskirq (uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execwaitirq (uint32_t rd, uint32_t rs1, int32_t rs2);
+    void exectimer (uint32_t rd, uint32_t rs1, int32_t rs2);
+
 
   public:
 
@@ -1340,6 +1349,7 @@ namespace WdRiscv
     IntRegs<URV> intRegs_;       // Integer register file.
     CsRegs<URV> csRegs_;         // Control and status registers.
     FpRegs<double> fpRegs_;      // Floating point registers.
+    CstRegs<URV> cstRegs_;       // Custom register file.
     bool rv64_ = sizeof(URV)==8; // True if 64-bit base (RV64I).
     bool rva_ = false;           // True if extension A (atomic) enabled.
     bool rvc_ = true;            // True if extension C (compressed) enabled.
@@ -1348,6 +1358,12 @@ namespace WdRiscv
     bool rvm_ = true;            // True if extension M (mul/div) enabled.
     bool rvs_ = false;           // True if extension S (supervisor-mode) enabled.
     bool rvu_ = false;           // True if extension U (user-mode) enabled.
+    bool isRType = false;        // True if current instruction is R-type. 
+    bool isIType = false;        // True if current instruction is I-type.
+    bool isSType = false;        // True if current instruction is S-type.
+    bool isBType = false;        // True if current instruction is B-type.
+    bool isUType = false;        // True if current instruction is U-type.
+    bool isJType = false;        // True if current instruction is J-type.
     URV pc_ = 0;                 // Program counter. Incremented by instr fetch.
     URV currPc_ = 0;             // Addr instr being executed (pc_ before fetch).
     URV resetPc_ = 0;            // Pc to use on reset.

@@ -202,7 +202,7 @@ namespace WdRiscv
       return 0x1f;
     }
 
-  protected:
+  public:
 
     void reset()
     {
@@ -233,7 +233,7 @@ namespace WdRiscv
       return true;
     }
 
-  private:
+  public:
 
     std::vector<URV> regs_;
     int lastWrittenReg_ = -1;  // Register accessed in most recent write.

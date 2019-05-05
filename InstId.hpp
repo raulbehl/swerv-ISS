@@ -94,6 +94,9 @@ namespace WdRiscv
       c_slli, c_slli64, c_fldsp, c_lwsp, c_flwsp, c_ldsp, c_jr, c_mv,
       c_ebreak, c_jalr, c_add, c_fsdsp, c_swsp, c_fswsp,
       c_addiw, c_sdsp,
+      
+      // Custom insts
+      getq, setq, retirq, maskirq, waitirq, timer,
 
       maxId = c_sdsp
     };

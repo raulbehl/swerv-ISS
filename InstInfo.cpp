@@ -322,6 +322,12 @@ InstInfoTable::setupInstVec()
 	OperandType::IntReg, OperandMode::Read, rs1Mask,
 	OperandType::IntReg, OperandMode::Read, rs2Mask },
 
+      { "getq", InstId::getq, 0x0033, top7Funct3Low7Mask,
+	InstType::Int,
+	OperandType::IntReg, OperandMode::Write, rdMask,
+	OperandType::IntReg, OperandMode::Read, rs1Mask,
+	OperandType::IntReg, OperandMode::Read, rs2Mask },
+
       { "fence", InstId::fence, 0x000f, 0xf00fffff,
 	InstType::Int,
 	OperandType::Imm, OperandMode::None, 0x0f000000,
