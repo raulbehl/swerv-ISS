@@ -2762,7 +2762,7 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   // Simulator stats.
   struct timeval t1;
   gettimeofday(&t1, nullptr);
-  double elapsed = (double(t1.tv_sec - t0.tv_sec)
+  double elapsed = (double(t1.tv_sec - t0.tv_sec) +
 		    double(t1.tv_usec - t0.tv_usec)*1e-6);
 
   uint64_t numInsts = counter_ - counter0;
@@ -2883,7 +2883,7 @@ Core<URV>::run(FILE* file)
   // Simulator stats.
   struct timeval t1;
   gettimeofday(&t1, nullptr);
-  double elapsed = (double(t1.tv_sec - t0.tv_sec)
+  double elapsed = (double(t1.tv_sec - t0.tv_sec) +
 		    double(t1.tv_usec - t0.tv_usec)*1e-6);
 
   std::cout.flush();
