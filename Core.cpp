@@ -1,17 +1,17 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2018 Western Digital Corporation or its affiliates.
-// 
+//
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful, but WITHOUT
 // ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
 // FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
 // more details.
-// 
+//
 // You should have received a copy of the GNU General Public License along with
 // this program. If not, see <https://www.gnu.org/licenses/>.
 //
@@ -208,7 +208,7 @@ Core<URV>::reset(bool resetMemoryMappedRegs)
 		      << "-- ignored\n";
 	}
     }
-  
+
   prevCountersCsrOn_ = true;
   countersCsrOn_ = true;
   if (peekCsr(CsrNumber::MGPMC, value))
@@ -583,7 +583,6 @@ void
 Core<URV>::execAndi(uint32_t rd, uint32_t rs1, int32_t imm)
 {
   URV v = intRegs_.read(rs1) & SRV(imm);
-  printf ("Value: %-.08x RS1: %-.08x\n", v, intRegs_.read(rs1));
   intRegs_.write(rd, v);
 }
 
@@ -592,7 +591,7 @@ template <typename URV>
 void
 Core<URV>::execgetq(uint32_t rd, uint32_t rs1, int32_t rs2) {
   URV v = cstRegs_.read(rs1);
-  intRegs_.write(rd, v);
+  //intRegs_.write(rd, v);
 }
 
 
@@ -995,9 +994,9 @@ printSignedHisto(const char* tag, const std::vector<uint64_t>& histo,
     fprintf(file, "    %s (2,     16] %ld\n", tag, histo.at(9));
   if (histo.at(10))
     fprintf(file, "    %s (16,    1k] %ld\n", tag, histo.at(10));
-  if (histo.at(11))	              
+  if (histo.at(11))
     fprintf(file, "    %s (1k,   64k] %ld\n", tag, histo.at(11));
-  if (histo.at(12))	              
+  if (histo.at(12))
     fprintf(file, "    %s > 64k       %ld\n", tag, histo.at(12));
 }
 
@@ -1284,7 +1283,7 @@ Core<URV>::defineIccm(size_t region, size_t offset, size_t size)
     regionHasLocalMem_.at(region) = true;
   return ok;
 }
-    
+
 
 template <typename URV>
 bool
@@ -1559,7 +1558,7 @@ Core<URV>::initiateTrap(bool interrupt, URV cause, URV pcToSave, URV info)
   // ... and putting it back
   if (not csRegs_.write(CsrNumber::MSTATUS, privMode_, debugMode_, msf.value_))
     assert(0 and "Failed to write MSTATUS register");
-  
+
   // Set program counter to trap handler address.
   URV tvec = 0;
   if (not csRegs_.read(tvecNum, privMode_, debugMode_, tvec))
@@ -1618,7 +1617,7 @@ Core<URV>::initiateNmi(URV cause, URV pcToSave)
   // ... and putting it back
   if (not csRegs_.write(CsrNumber::MSTATUS, privMode_, debugMode_, msf.value_))
     assert(0 and "Failed to write MSTATUS register");
-  
+
   // Clear pending nmi bit in dcsr
   URV dcsrVal = 0;
   if (peekCsr(CsrNumber::DCSR, dcsrVal))
@@ -1635,7 +1634,7 @@ Core<URV>::initiateNmi(URV cause, URV pcToSave)
 template <typename URV>
 bool
 Core<URV>::peekIntReg(unsigned ix, URV& val) const
-{ 
+{
   if (ix < intRegs_.size())
     {
       val = intRegs_.read(ix);
@@ -1648,7 +1647,7 @@ Core<URV>::peekIntReg(unsigned ix, URV& val) const
 template <typename URV>
 URV
 Core<URV>::peekIntReg(unsigned ix) const
-{ 
+{
   assert(ix < intRegs_.size());
   return intRegs_.read(ix);
 }
@@ -1657,7 +1656,7 @@ Core<URV>::peekIntReg(unsigned ix) const
 template <typename URV>
 bool
 Core<URV>::peekIntReg(unsigned ix, URV& val, std::string& name) const
-{ 
+{
   if (ix < intRegs_.size())
     {
       val = intRegs_.read(ix);
@@ -1671,7 +1670,7 @@ Core<URV>::peekIntReg(unsigned ix, URV& val, std::string& name) const
 template <typename URV>
 bool
 Core<URV>::peekFpReg(unsigned ix, uint64_t& val) const
-{ 
+{
   if (not isRvf() and not isRvd())
     return false;
 
@@ -1688,7 +1687,7 @@ Core<URV>::peekFpReg(unsigned ix, uint64_t& val) const
 template <typename URV>
 bool
 Core<URV>::pokeFpReg(unsigned ix, uint64_t val)
-{ 
+{
   if (not isRvf() and not isRvd())
     return false;
 
@@ -1705,7 +1704,7 @@ Core<URV>::pokeFpReg(unsigned ix, uint64_t val)
 template <typename URV>
 bool
 Core<URV>::pokeIntReg(unsigned ix, URV val)
-{ 
+{
   if (ix < intRegs_.size())
     {
       intRegs_.poke(ix, val);
@@ -1718,7 +1717,7 @@ Core<URV>::pokeIntReg(unsigned ix, URV val)
 template <typename URV>
 bool
 Core<URV>::peekCsr(CsrNumber csrn, URV& val) const
-{ 
+{
   return csRegs_.peek(csrn, val);
 }
 
@@ -1727,7 +1726,7 @@ template <typename URV>
 bool
 Core<URV>::peekCsr(CsrNumber csrn, URV& val, URV& reset, URV& writeMask,
 		   URV& pokeMask) const
-{ 
+{
   const Csr<URV>* csr = csRegs_.getImplementedCsr(csrn);
   if (not csr)
     return false;
@@ -1745,7 +1744,7 @@ Core<URV>::peekCsr(CsrNumber csrn, URV& val, URV& reset, URV& writeMask,
 template <typename URV>
 bool
 Core<URV>::peekCsr(CsrNumber csrn, URV& val, std::string& name) const
-{ 
+{
   const Csr<URV>* csr = csRegs_.getImplementedCsr(csrn);
   if (not csr)
     return false;
@@ -1761,7 +1760,7 @@ Core<URV>::peekCsr(CsrNumber csrn, URV& val, std::string& name) const
 template <typename URV>
 bool
 Core<URV>::pokeCsr(CsrNumber csr, URV val)
-{ 
+{
   // Direct write to MEIHAP will not affect claimid field. Poking
   // MEIHAP will only affect the claimid field.
   if (csr == CsrNumber::MEIHAP)
@@ -2083,7 +2082,7 @@ Core<URV>::printInstTrace(uint32_t inst, uint64_t tag, std::string& tmp,
       pending = true;
     }
 
-  if (pending) 
+  if (pending)
     fprintf(out, "\n");
   else
     {
@@ -2763,7 +2762,7 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   // Simulator stats.
   struct timeval t1;
   gettimeofday(&t1, nullptr);
-  double elapsed = (double(t1.tv_sec - t0.tv_sec) +
+  double elapsed = (double(t1.tv_sec - t0.tv_sec)
 		    double(t1.tv_usec - t0.tv_usec)*1e-6);
 
   uint64_t numInsts = counter_ - counter0;
@@ -2790,7 +2789,7 @@ Core<URV>::simpleRun()
 
   try
     {
-      while (userOk) 
+      while (userOk)
 	{
 	  // Fetch instruction
 	  currPc_ = pc_;
@@ -2884,7 +2883,7 @@ Core<URV>::run(FILE* file)
   // Simulator stats.
   struct timeval t1;
   gettimeofday(&t1, nullptr);
-  double elapsed = (double(t1.tv_sec - t0.tv_sec) +
+  double elapsed = (double(t1.tv_sec - t0.tv_sec)
 		    double(t1.tv_usec - t0.tv_usec)*1e-6);
 
   std::cout.flush();
@@ -3212,7 +3211,7 @@ Core<URV>::whatIfSingleStep(uint32_t inst, ChangeRecord& record)
   exceptionCount_ = prevExceptionCount;
 
   collectAndUndoWhatIfChanges(prevPc, record);
-  
+
   return result;
 }
 
@@ -3405,7 +3404,7 @@ Core<URV>::executeFp(uint32_t inst)
       if      (rs2 == 0)              execFcvt_w_s(rd, rs1, rs2);
       else if (rs2 == 1)              execFcvt_wu_s(rd, rs1, rs2);
       else if (rs2 == 2)              execFcvt_l_s(rd, rs1, rs2);
-      else if (rs2 == 3)              execFcvt_lu_s(rd, rs1, rs2);      
+      else if (rs2 == 3)              execFcvt_lu_s(rd, rs1, rs2);
       else                            illegalInst();
     }
   else if (f7 == 0x68)
@@ -3413,7 +3412,7 @@ Core<URV>::executeFp(uint32_t inst)
       if      (rs2 == 0)              execFcvt_s_w(rd, rs1, rs2);
       else if (rs2 == 1)              execFcvt_s_wu(rd, rs1, rs2);
       else if (rs2 == 2)              execFcvt_s_l(rd, rs1, rs2);
-      else if (rs2 == 3)              execFcvt_s_lu(rd, rs1, rs2);      
+      else if (rs2 == 3)              execFcvt_s_lu(rd, rs1, rs2);
       else                            illegalInst();
     }
   else if (f7 == 0x70)
@@ -3437,7 +3436,7 @@ void
 Core<URV>::execute32(uint32_t inst)
 {
 #pragma GCC diagnostic ignored "-Wpedantic"
-  
+
   static void *opcodeLabels[] = { &&l0, &&l1, &&l2, &&l3, &&l4, &&l5,
 				  &&l6, &&l7, &&l8, &&l9, &&l10, &&l11,
 				  &&l12, &&l13, &&l14, &&l15, &&l16, &&l17,
@@ -4054,7 +4053,7 @@ Core<URV>::execute16(uint16_t inst)
 	  execAddi(cif.bits.rd, cif.bits.rd, cif.addiImmed());
 	  return;
 	}
-	  
+
       if (funct3 == 1)  // c.jal, in rv64 and rv128 this is c.addiw
 	{
 	  if (isRv64())
@@ -4146,7 +4145,7 @@ Core<URV>::execute16(uint16_t inst)
 	  execJal(RegX0, cjf.immed());
 	  return;
 	}
-	  
+
       if (funct3 == 6)  // c.beqz
 	{
 	  CbFormInst cbf(inst);
@@ -4224,7 +4223,7 @@ Core<URV>::execute16(uint16_t inst)
 	      else
 		execAdd(rd, RegX0, rs2);
 	    }
-	  else  // c.ebreak, c.jalr or c.add 
+	  else  // c.ebreak, c.jalr or c.add
 	    {
 	      if (rs2 == RegX0)
 		{
@@ -4286,7 +4285,7 @@ void
 Core<URV>::disassembleInst(uint32_t inst, std::ostream& stream)
 {
   // Decode and disassemble
-  if ((inst & 0x3) == 0x3) 
+  if ((inst & 0x3) == 0x3)
     disassembleInst32(inst, stream);
   else
     disassembleInst16(uint16_t(inst), stream);
@@ -4396,7 +4395,7 @@ Core<URV>::expandInst(uint16_t inst, uint32_t& code32) const
 	  CiFormInst cif(inst);
 	  return encodeAddi(cif.bits.rd, cif.bits.rd, cif.addiImmed(), code32);
 	}
-	  
+
       if (funct3 == 1)  // c.jal, in rv64 and rv128 this is c.addiw
 	{
 	  if (isRv64())
@@ -4478,7 +4477,7 @@ Core<URV>::expandInst(uint16_t inst, uint32_t& code32) const
 	  CjFormInst cjf(inst);
 	  return encodeJal(RegX0, cjf.immed(), 0, code32);
 	}
-	  
+
       if (funct3 == 6) // c.beqz
 	{
 	  CbFormInst cbf(inst);
@@ -4546,7 +4545,7 @@ Core<URV>::expandInst(uint16_t inst, uint32_t& code32) const
 		}
 	      return encodeAdd(rd, RegX0, rs2, code32);
 	    }
-	  else  // c.ebreak, c.jalr or c.add 
+	  else  // c.ebreak, c.jalr or c.add
 	    {
 	      if (rs2 == RegX0)
 		{
@@ -4601,7 +4600,7 @@ const InstInfo&
 Core<URV>::decodeFp(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 {
   if (not isRvf())
-    return instTable_.getInstInfo(InstId::illegal);  
+    return instTable_.getInstInfo(InstId::illegal);
 
   RFormInst rform(inst);
   op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
@@ -4610,7 +4609,7 @@ Core<URV>::decodeFp(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
   if (f7 & 1)
     {
       if (not isRvd())
-	return instTable_.getInstInfo(InstId::illegal);  
+	return instTable_.getInstInfo(InstId::illegal);
 
       if (f7 == 1)              return instTable_.getInstInfo(InstId::fadd_d);
       if (f7 == 5)              return instTable_.getInstInfo(InstId::fsub_d);
@@ -4811,7 +4810,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = cif.addiImmed();
 	  return instTable_.getInstInfo(InstId::c_addi);
 	}
-	  
+
       if (funct3 == 1)  // c.jal,  in rv64 and rv128 this is c.addiw
 	{
 	  if (isRv64())
@@ -5053,6 +5052,12 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 				  &&l18, &&l19, &&l20, &&l21, &&l22, &&l23,
 				  &&l24, &&l25, &&l26, &&l27, &&l28, &&l29,
 				  &&l30, &&l31 };
+  isRType = false;
+  isIType = false;
+  isSType = false;
+  isBType = false;
+  isUType = false;
+  isJType = false;
 
   if (isCompressedInst(inst))
     {
@@ -5516,7 +5521,9 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
     l28:  // 11100  I-form
       {
 	IFormInst iform(inst);
-  isIType = true;
+  //TODO: Fix this once status register checks
+  // are added.
+  isIType = false;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.uimmed(); // csr
@@ -5694,7 +5701,7 @@ Core<URV>::printBranchInst(std::ostream& stream, const char* inst,
       sign = '-';
       imm = -imm;
     }
-      
+
   stream << sign << " 0x" << std::hex << (imm & 0xfff);
 }
 
@@ -5924,7 +5931,7 @@ Core<URV>::disassembleFp(uint32_t inst, std::ostream& os)
       else if (f3 == 1)	os << "fmax.s  f" << rd << ", f" << rs1 << ", f" << rs2;
       else              os << "illegal";
     }
-  
+ 
   else if (f7 == 0x20 and rs2 == 1)
     os << "fcvt.s.d f" << rd << ", f" << rs1 << ", " << rms;
   else if (f7 == 0x2c)
@@ -6108,7 +6115,7 @@ Core<URV>::disassembleInst32(uint32_t inst, std::ostream& stream)
 	    }
 	  else if (f7 == 2)
 	    {
-	      if (f3 == 2)       printInstRdRs1Rs2(stream, "retirq",    rd, rs1, rs2);
+	      if (f3 == 0)       printInstRdRs1Rs2(stream, "retirq",    rd, rs1, rs2);
 	      else               stream << "illegal";
 	    }
 	  else if (f7 == 3)
@@ -6164,10 +6171,10 @@ Core<URV>::disassembleInst32(uint32_t inst, std::ostream& stream)
 	int32_t imm = iform.immed();
 	switch (iform.fields.funct3)
 	  {
-	  case 0: 
+	  case 0:
 	    printInstRegRegImm12(stream, "addi", rd, rs1, imm);
 	    break;
-	  case 1: 
+	  case 1:
 	    {
 	      unsigned topBits = 0, shamt = 0;
 	      iform.getShiftFields(isRv64(), topBits, shamt);
@@ -6624,7 +6631,7 @@ Core<URV>::disassembleInst32(uint32_t inst, std::ostream& stream)
 	  case 7:
 	    stream << "csrrci   " << rdn << ", " << csrn << ", " << rs1n;
 	    break;
-	  default: 
+	  default:
 	    stream << "illegal";
 	    break;
 	  }
@@ -6654,7 +6661,7 @@ Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
   switch (quadrant)
     {
     case 0:    // quadrant 0
-      switch (funct3) 
+      switch (funct3)
 	{
 	case 0:   // illegal, c.addi4spn
 	  {
@@ -6672,7 +6679,7 @@ Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
 	      }
 	  }
 	  break;
-	case 1: // c_fld, c_lq  
+	case 1: // c_fld, c_lq
 	  stream << "illegal";
 	  break;
 	case 2: // c.lw
@@ -6687,7 +6694,7 @@ Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
 	    ClFormInst clf(inst);
 	    unsigned rd = 8+clf.bits.rdp, rs1 = (8+clf.bits.rs1p);
 	    if (isRv64())
-	      printInstLdSt(stream, "c.ld", rd, rs1, clf.ldImmed()); 
+	      printInstLdSt(stream, "c.ld", rd, rs1, clf.ldImmed());
 	    else
 	      {
 		if (isRvf())
@@ -6747,7 +6754,7 @@ Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
 	      printInstRegImm(stream, "c.addi", cif.bits.rd, cif.addiImmed());
 	  }
 	  break;
-	  
+
 	case 1:  // c.jal, in rv64 and rv128 this is c.addiw
 	  if (isRv64())
 	    {
@@ -6868,7 +6875,7 @@ Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
 	    stream << sign << " 0x" << std::hex << imm;
 	  }
 	  break;
-	  
+
 	case 6:  // c.beqz
 	  {
 	    CbFormInst cbf(inst);
@@ -7930,7 +7937,7 @@ Core<URV>::execMret(uint32_t, uint32_t, int32_t)
   if (not csRegs_.read(CsrNumber::MEPC, privMode_, debugMode_, epc))
     illegalInst();
   pc_ = (epc >> 1) << 1;  // Restore pc clearing least sig bit.
-      
+
   // Update privilege mode.
   privMode_ = savedMode;
 }
@@ -7966,7 +7973,7 @@ Core<URV>::execSret(uint32_t, uint32_t, int32_t)
 
   // ... updating/unpacking its fields,
   MstatusFields<URV> fields(value);
-  
+
   PrivilegeMode savedMode = fields.bits_.SPP? PrivilegeMode::Supervisor :
     PrivilegeMode::User;
   fields.bits_.SIE = fields.bits_.SPIE;
@@ -8968,7 +8975,7 @@ Core<URV>::updateAccruedFpBits()
       URV prev = val;
 
       int flags = fetestexcept(FE_ALL_EXCEPT);
-      
+
       if (flags & FE_INEXACT)
 	val |= URV(FpFlags::Inexact);
 
@@ -8977,7 +8984,7 @@ Core<URV>::updateAccruedFpBits()
 
       if (flags & FE_OVERFLOW)
 	val |= URV(FpFlags::Overflow);
-      
+
       if (flags & FE_DIVBYZERO)
 	val |= URV(FpFlags::DivByZero);
 
@@ -9553,7 +9560,7 @@ Core<URV>::execFmv_x_w(uint32_t rd, uint32_t rs1, int32_t)
   intRegs_.write(rd, value);
 }
 
- 
+
 template <typename URV>
 void
 Core<URV>::execFeq_s(uint32_t rd, uint32_t rs1, int32_t rs2)
