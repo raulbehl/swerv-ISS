@@ -269,6 +269,7 @@ bool compareRD (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata, uint32_t iss_
   if (spirit_rd_addr != iss_rd_addr) {
     fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rd_addr);
     fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rd_addr);
+    fprintf (stdout, "RD Value Mismatch\n");
     return false;
   }
   else if (spirit_rd_wdata != iss_rd_wdata) {
@@ -283,13 +284,14 @@ bool compareRD (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata, uint32_t iss_
 bool compareRS1 (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata, uint32_t iss_rs1_addr) {
   uint32_t iss_rs1_rdata;
 
-  iss_rs1_rdata = (core<uint32_t>.intRegs_.lastWrittenReg_==iss_rs1_addr) ? 
-                       core<uint32_t>.intRegs_.originalValue_ :
-                       core<uint32_t>.intRegs_.read(iss_rs1_addr);
+  iss_rs1_rdata = (op0==iss_rs1_addr) ?
+                   core<uint32_t>.intRegs_.originalValue_ :
+                   core<uint32_t>.intRegs_.read(iss_rs1_addr);
 
   if (spirit_rs1_addr != iss_rs1_addr) {
     fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rs1_addr);
     fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rs1_addr);
+    fprintf (stdout, "RS1 Value Mismatch\n");
     return false;
   }
   else if (spirit_rs1_rdata != iss_rs1_rdata) {
@@ -304,13 +306,14 @@ bool compareRS1 (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata, uint32_t i
 bool compareRS2 (uint32_t spirit_rs2_addr, uint32_t spirit_rs2_rdata, uint32_t iss_rs2_addr) {
   uint32_t iss_rs2_rdata;
 
-  iss_rs2_rdata = (core<uint32_t>.intRegs_.lastWrittenReg_==iss_rs2_addr) ? 
+  iss_rs2_rdata = (core<uint32_t>.intRegs_.lastWrittenReg_==iss_rs2_addr) ?
                        core<uint32_t>.intRegs_.originalValue_ :
                        core<uint32_t>.intRegs_.read(iss_rs2_addr);
 
   if (spirit_rs2_addr != iss_rs2_addr) {
     fprintf (stdout, "Unexpected R%-.2d Register\n", spirit_rs2_addr);
     fprintf (stdout, "Expecting  R%-.2d Register\n", iss_rs2_addr);
+    fprintf (stdout, "RS2 Value Mismatch\n");
     return false;
   }
   else if (spirit_rs2_rdata != iss_rs2_rdata) {
@@ -337,6 +340,8 @@ extern "C"
 int issCompareInst (uint32_t spirit_pc_rdata, uint32_t spirit_inst) {
 
   bool fetchOK = true;
+  std::string disass;
+
   fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
   // Decode the instruction
   info = core<uint32_t>.decode(inst, op0, op1, op2);
@@ -346,7 +351,7 @@ int issCompareInst (uint32_t spirit_pc_rdata, uint32_t spirit_inst) {
       fprintf (stdout, "PC Mismatch\n");
       return 0;
   }
-  else { 
+  else {
     if (isCompressedInst(inst)) inst = inst&0xFFFF;
     if (inst != spirit_inst) {
       fprintf (stdout, "RTL INSTR: %-.8x\t ISS INSTR: %-.8x\n", spirit_inst, inst);
@@ -354,6 +359,8 @@ int issCompareInst (uint32_t spirit_pc_rdata, uint32_t spirit_inst) {
       return 0;
     }
   }
+  core<uint32_t>.disassembleInst(inst, disass);
+  fprintf(stdout, "%-.08x %-.08x\t%s\n", spirit_pc_rdata, spirit_inst, disass.c_str());
   return 1;
 }
 
@@ -378,6 +385,7 @@ int issCompareR (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
     if(!(compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2)))
       return 0;
   }
+  fprintf(stdout, "X%.02d: %-.08x\n\n", spirit_rd_addr, spirit_rd_wdata);
   return 1;
 }
 
@@ -385,11 +393,6 @@ extern "C"
 int issCompareI (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
                  uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata) {
 
-  //printf("Comparing I-type\n");
-  //printf("[RTL] RD: X[%-.2x]:%-.8x\n", spirit_rd_addr, spirit_rd_wdata);
-  //printf("[ISS] RD: X[%-.2x]:%-.8x\n", op0, core<uint32_t>.intRegs_.read(op0));
-  //printf("[RTL] RS1: X[%-.2x]:%-.8x\n", spirit_rs1_addr, spirit_rs1_rdata);
-  //printf("[ISS] RS1: X[%-.2x]:%-.8x\n", spirit_rs1_addr, spirit_rs1_rdata);
   // Compare RD register and the value if written/read
   if (info.ithOperandMode(0) != OperandMode::None) {
     if (!(compareRD (spirit_rd_addr, spirit_rd_wdata, op0)))
@@ -400,6 +403,7 @@ int issCompareI (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata,
     if (!(compareRS1 (spirit_rs1_addr, spirit_rs1_rdata, op1)))
       return 0;
   }
+  fprintf(stdout, "X%.02d: %-.08x\n\n", spirit_rd_addr, spirit_rd_wdata);
   return 1;
 }
 
@@ -418,6 +422,7 @@ int issCompareSB (uint32_t spirit_rs1_addr, uint32_t spirit_rs1_rdata,
     if (!(compareRS2 (spirit_rs2_addr, spirit_rs2_rdata, op2)))
       return 0;
   }
+  fprintf(stdout, "\n");
   return 1;
 }
 
@@ -429,6 +434,7 @@ int issCompareUJ (uint32_t spirit_rd_addr, uint32_t spirit_rd_wdata) {
     if (!(compareRD (spirit_rd_addr, spirit_rd_wdata, op0)))
       return 0;
   }
+  fprintf(stdout, "X%.02d: %-.08x\n\n", spirit_rd_addr, spirit_rd_wdata);
   return 1;
 }
 
@@ -439,41 +445,52 @@ void issExec () {
   // singleStep updates the PC. Use prevPC for comparison/decode
   prevPC = core<uint32_t>.pc_;
   // Execute the ISS model for one cycle
-  core<uint32_t>.singleStep(stdout);
+  core<uint32_t>.singleStep();
   return;
 }
 
 extern "C"
 int isRTypeInst () {
-  return core<uint32_t>.isRType ? 1 : 0;
+  return core<uint32_t>.isRType;
 }
 
 extern "C"
 int isITypeInst () {
-  return core<uint32_t>.isIType ? 1 : 0;
+  return core<uint32_t>.isIType;
 }
 
 extern "C"
 int isSTypeInst () {
-  return core<uint32_t>.isSType ? 1 : 0;
+  return core<uint32_t>.isSType;
 }
 
 extern "C"
 int isBTypeInst () {
-  return core<uint32_t>.isBType ? 1 : 0;
+  return core<uint32_t>.isBType;
 }
 
 extern "C"
 int isUTypeInst () {
-  return core<uint32_t>.isUType ? 1 : 0;
+  return core<uint32_t>.isUType;
 }
 
 extern "C"
 int isJTypeInst () {
-  return core<uint32_t>.isJType ? 1 : 0;
+  return core<uint32_t>.isJType;
 }
 
 extern "C"
 void issSetPC (uint32_t pc) {
   core<uint32_t>.pc_ = pc;
 }
+
+extern "C"
+void issSetIntReg (uint32_t regNum, uint32_t value) {
+  core<uint32_t>.intRegs_.write(regNum, value);
+}
+
+extern "C"
+void issSetCstReg (uint32_t regNum, uint32_t value) {
+  core<uint32_t>.cstRegs_.write(regNum, value);
+}
+

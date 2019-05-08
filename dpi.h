@@ -40,3 +40,8 @@ int issCompareUJ (uint32_t, uint32_t);
 extern "C"
 void issSetPC    (uint32_t);
 
+extern "C"
+void issSetIntReg   (uint32_t, uint32_t);
+
+extern "C"
+void issSetCstReg   (uint32_t, uint32_t);
