@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
 #include <type_traits>
 #include <assert.h>
 
@@ -794,6 +795,8 @@ namespace WdRiscv
     size_t pageSize_      = 4*1024;    // Must be a power of 2.
     unsigned pageShift_   = 12;        // Shift address by this to get page no.
     unsigned regionShift_ = 28;        // Shift address by this to get region no
+
+    std::mutex amoMutex_;
 
     // Attributes are assigned to pages.
     std::vector<PageAttribs> attribs_;      // One entry per page.

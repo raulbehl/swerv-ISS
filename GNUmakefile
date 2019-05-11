@@ -77,7 +77,6 @@ $(BUILD_DIR)/%.c.o:  %.c
 
 # Main target.(only linking)
 $(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/ISSCompare.cpp.o \
-                         $(BUILD_DIR)/linenoise.c.o \
                          $(BUILD_DIR)/librvcore.a
 	$(CXX) -o $@.so $^ $(LINK_DIRS) $(LINK_LIBS) -lz -lm -shared -static-libstdc++ -Wl,--export-dynamic -Bsymbolic
 
@@ -85,7 +84,8 @@ $(BUILD_DIR)/$(PROJECT): $(BUILD_DIR)/ISSCompare.cpp.o \
 RVCORE_SRCS := IntRegs.cpp CstRegs.cpp CsRegs.cpp instforms.cpp \
             Memory.cpp Core.cpp InstInfo.cpp Triggers.cpp \
             PerfRegs.cpp gdb.cpp CoreConfig.cpp \
-            Server.cpp Interactive.cpp
+            Server.cpp Interactive.cpp decode.cpp disas.cpp \
+	    newlib.cpp
 
 # List of All CPP Sources for the project
 SRCS_CXX += $(RVCORE_SRCS) ISSCompare.cpp

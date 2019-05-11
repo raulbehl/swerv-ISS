@@ -24,7 +24,7 @@
 #include <boost/format.hpp>
 #include <boost/algorithm/string.hpp>
 #include "Interactive.hpp"
-#include "linenoise.h"
+#include "linenoise.hpp"
 
 using namespace WdRiscv;
 
@@ -702,13 +702,6 @@ Interactive<URV>::disassCommand(Core<URV>& core, const std::string& line,
 }
 
 
-template<typename URV>
-extern
-bool
-loadElfFile(Core<URV>& core, const std::string& filePath);
-
-
-
 template <typename URV>
 bool
 Interactive<URV>::elfCommand(Core<URV>& core, const std::string& line,
@@ -721,8 +714,34 @@ Interactive<URV>::elfCommand(Core<URV>& core, const std::string& line,
       return false;
     }
 
-  std::string fileName = tokens.at(1);
-  return loadElfFile(core, fileName);
+  std::string filePath = tokens.at(1);
+
+  size_t entryPoint = 0, exitPoint = 0;
+
+  if (not core.loadElfFile(filePath, entryPoint, exitPoint))
+    return false;
+
+  core.pokePc(URV(entryPoint));
+
+  if (exitPoint)
+    core.setStopAddress(URV(exitPoint));
+
+  ElfSymbol sym;
+  if (core.findElfSymbol("tohost", sym))
+    core.setToHostAddress(sym.addr_);
+
+  if (core.findElfSymbol("__whisper_console_io", sym))
+    core.setConsoleIo(URV(sym.addr_));
+
+  if (core.findElfSymbol("__global_pointer$", sym))
+    core.pokeIntReg(RegGp, URV(sym.addr_));
+
+  if (core.findElfSymbol("_end", sym))   // For newlib emulation.
+    core.setTargetProgramBreak(URV(sym.addr_));
+  else
+    core.setTargetProgramBreak(URV(exitPoint));
+
+  return true;
 }
 
 
@@ -1237,14 +1256,22 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
   if (tokens.empty())
     return true;
 
+  std::string outLine;   // Line to print on command log.
+
   // Recover hart id (if any) removing hart=<id> token from tokens.
   unsigned hartId = 0;
   bool error = false;
   bool hasHart = getCommandHartId(tokens, hartId, error);
   if (error)
     return false;
-  if (not hasHart)
-    hartId = currentHartId;
+
+  if (hasHart)
+    outLine = line;
+  else
+    {
+      hartId = currentHartId;
+      outLine = std::string("hart=") + std::to_string(hartId) + " " + line;
+    }
 
   if (hartId >= cores_.size())
     {
@@ -1263,7 +1290,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
     {
       bool success = core.run(traceFile);
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return success;
     }
 
@@ -1272,7 +1299,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not untilCommand(core, line, tokens, traceFile))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1286,7 +1313,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not stepCommand(core, line, tokens, traceFile))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1295,7 +1322,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not peekCommand(core, line, tokens))
 	return false;
        if (commandLog)
-	 fprintf(commandLog, "%s\n", line.c_str());
+	 fprintf(commandLog, "%s\n", outLine.c_str());
        return true;
     }
 
@@ -1304,7 +1331,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not pokeCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1313,7 +1340,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not disassCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1322,7 +1349,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not elfCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1331,14 +1358,14 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not hexCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
   if (command == "q" or command == "quit")
     {
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       done = true;
       return true;
     }
@@ -1348,7 +1375,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not resetCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1357,7 +1384,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not exceptionCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1365,7 +1392,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
     {
       core.enterDebugMode(core.peekPc());
       if (commandLog)
-	fprintf(commandLog, "enter_debug\n");
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1373,7 +1400,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
     {
       core.exitDebugMode();
       if (commandLog)
-	fprintf(commandLog, "exit_debug\n");
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1382,7 +1409,7 @@ Interactive<URV>::executeLine(unsigned& currentHartId,
       if (not loadFinishedCommand(core, line, tokens))
 	return false;
       if (commandLog)
-	fprintf(commandLog, "%s\n", line.c_str());
+	fprintf(commandLog, "%s\n", outLine.c_str());
       return true;
     }
 
@@ -1478,6 +1505,8 @@ Interactive<URV>::replayCommand(unsigned& currentHartId,
 		       boost::token_compress_on);
 	  if (tokens.size() > 0 and tokens.at(0) == "step")
 	    count++;
+	  else if (tokens.size() > 1 and tokens.at(1) == "step")
+	    count++;
 	}
 
       return true;
@@ -1493,29 +1522,29 @@ template <typename URV>
 bool
 Interactive<URV>::interact(FILE* traceFile, FILE* commandLog)
 {
-  linenoiseHistorySetMaxLen(1024);
+  linenoise::SetHistoryMaxLen(1024);
 
   uint64_t errors = 0;
   unsigned currentHartId = 0;
   std::string replayFile;
   std::ifstream replayStream;
 
-  bool done = false;
+  const char* prompt = isatty(0) ? "whisper> " : "";
 
+  bool done = false;
   while (not done)
     {
       errno = 0;
-      char* cline = linenoise("whisper> ");
-      if (cline == nullptr)
+      std::string line = linenoise::Readline(prompt);
+
+      if (line.empty())
 	{
 	  if (errno == EAGAIN)
 	    continue;
 	  return true;
 	}
 
-      std::string line = cline;
-      linenoiseHistoryAdd(cline);
-      free(cline);
+      linenoise::AddHistory(line.c_str());
 
       if (not executeLine(currentHartId, line, traceFile, commandLog,
 			  replayStream, done))

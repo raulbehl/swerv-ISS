@@ -22,8 +22,16 @@
 #include <algorithm>
 #include <boost/format.hpp>
 #include <string.h>
+#ifdef __MINGW64__
+#include <winsock2.h>
+#else
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#endif
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 #include "WhisperMessage.h"
 #include "Server.hpp"
 
@@ -76,6 +84,14 @@ deserializeMessage(const char buffer[], size_t bufferLen,
   p += sizeof(x);
 
   uint32_t part = ntohl(*((uint32_t*)p));
+  msg.rank = uint64_t(part) << 32;
+  p += sizeof(part);
+
+  part = ntohl(*(uint32_t*)p);
+  msg.rank |= part;
+  p += sizeof(part);
+
+  part = ntohl(*((uint32_t*)p));
   msg.address = uint64_t(part) << 32;
   p += sizeof(part);
 
@@ -125,7 +141,17 @@ serializeMessage(const WhisperMessage& msg, char buffer[],
   memcpy(p, &x, sizeof(x));
   p += sizeof(x);
 
-  uint32_t part = static_cast<uint32_t>(msg.address >> 32);
+  uint32_t part = static_cast<uint32_t>(msg.rank >> 32);
+  x = htonl(part);
+  memcpy(p, &x, sizeof(x));
+  p += sizeof(x);
+
+  part = (msg.rank) & 0xffffffff;
+  x = htonl(part);
+  memcpy(p, &x, sizeof(x));
+  p += sizeof(x);
+
+  part = static_cast<uint32_t>(msg.address >> 32);
   x = htonl(part);
   memcpy(p, &x, sizeof(x));
   p += sizeof(x);
@@ -149,7 +175,7 @@ serializeMessage(const WhisperMessage& msg, char buffer[],
   p += sizeof(msg.buffer);
 
   size_t len = p - buffer;
-  assert(len < bufferLen);
+  assert(len <= bufferLen);
   assert(len <= sizeof(msg));
   for (size_t i = len; i < sizeof(msg); ++i)
     buffer[i] = 0;
@@ -350,8 +376,8 @@ Server<URV>::disassembleAnnotateInst(uint32_t inst, bool interrupted,
   auto& core = *(cores_.front());
 
   core.disassembleInst(inst, text);
-  uint32_t op0 = 0, op1 = 0; int32_t op2 = 0;
-  const InstInfo& info = core.decode(inst, op0, op1, op2);
+  uint32_t op0 = 0, op1 = 0; int32_t op2 = 0, op3 = 0;
+  const InstInfo& info = core.decode(inst, op0, op1, op2, op3);
   if (info.isBranch())
     {
       if (core.lastPc() + instructionSize(inst) != core.peekPc())
@@ -657,6 +683,7 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 	return false;
 
       uint32_t hart = msg.hart;
+      std::string timeStamp = std::to_string(msg.rank);
       if (hart >= cores_.size())
 	{
 	  assert(0);
@@ -673,22 +700,26 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 	    {
 	    case Quit:
 	      if (commandLog)
-		fprintf(commandLog, "quit\n");
+		fprintf(commandLog, "hart=%d quit\n", hart);
 	      return true;
 
 	    case Poke:
 	      pokeCommand(msg, reply);
 	      if (commandLog)
-		fprintf(commandLog, "poke %c %s %s\n", msg.resource,
+		fprintf(commandLog, "hart=%d poke %c %s %s # ts=%s\n", hart,
+			msg.resource,
 			(boost::format(hexForm) % msg.address).str().c_str(),
-			(boost::format(hexForm) % msg.value).str().c_str());
+			(boost::format(hexForm) % msg.value).str().c_str(),
+			timeStamp.c_str());
 	      break;
 
 	    case Peek:
 	      peekCommand(msg, reply);
 	      if (commandLog)
-		fprintf(commandLog, "peek %c %s\n", msg.resource,
-			(boost::format(hexForm) % msg.address).str().c_str());
+		fprintf(commandLog, "hart=%d peek %c %s # ts=%s\n", hart,
+			msg.resource,
+			(boost::format(hexForm) % msg.address).str().c_str(),
+			timeStamp.c_str());
 	      break;
 
 	    case Step:
@@ -702,7 +733,8 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 		}
 	      stepCommand(msg, pendingChanges, reply, traceFile);
 	      if (commandLog)
-		fprintf(commandLog, "step #%ld\n", core.getInstructionCount());
+		fprintf(commandLog, "hart=%d step #%" PRId64 " # ts=%s\n", hart,
+			core.getInstructionCount(), timeStamp.c_str());
 	      break;
 
 	    case ChangeCount:
@@ -715,8 +747,8 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 		reply.resource = inst;
 		std::string text;
 		core.disassembleInst(inst, text);
-		uint32_t op0 = 0, op1 = 0; int32_t op2 = 0;
-		const InstInfo& info = core.decode(inst, op0, op1, op2);
+		uint32_t op0 = 0, op1 = 0; int32_t op2 = 0, op3 = 0;
+		const InstInfo& info = core.decode(inst, op0, op1, op2, op3);
 		if (info.isBranch())
 		  {
 		    if (core.lastPc() + instructionSize(inst) != core.peekPc())
@@ -753,10 +785,12 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 		if (commandLog)
 		  {
 		    if (msg.value != 0)
-		      fprintf(commandLog, "reset %s\n",
-			      (boost::format(hexForm) % addr).str().c_str());
+		      fprintf(commandLog, "hart=%d reset %s # ts=%s\n", hart,
+			      (boost::format(hexForm) % addr).str().c_str(),
+			      timeStamp.c_str());
 		    else
-		      fprintf(commandLog, "reset\n");
+		      fprintf(commandLog, "hart=%d reset # ts=%s\n", hart,
+			      timeStamp.c_str());
 		  }
 	      }
 	      break;
@@ -766,7 +800,8 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 		std::string text;
 		exceptionCommand(msg, reply, text);
 		if (commandLog)
-		  fprintf(commandLog, "%s\n", text.c_str());
+		  fprintf(commandLog, "hart=%d %s # ts=%s\n", hart,
+			  text.c_str(), timeStamp.c_str());
 	      }
 	      break;
 
@@ -774,14 +809,16 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 	      core.enterDebugMode(core.peekPc());
 	      reply = msg;
 	      if (commandLog)
-		fprintf(commandLog, "enter_debug\n");
+		fprintf(commandLog, "hart=%d enter_debug # %s\n", hart,
+			timeStamp.c_str());
 	      break;
 
 	    case ExitDebug:
 	      core.exitDebugMode();
 	      reply = msg;
 	      if (commandLog)
-		fprintf(commandLog, "exit_debug\n");
+		fprintf(commandLog, "hart=%d exit_debug # %s\n", hart,
+			timeStamp.c_str());
 	      break;
 
 	    case LoadFinished:
@@ -797,12 +834,10 @@ Server<URV>::interact(int soc, FILE* traceFile, FILE* commandLog)
 		reply.value = matchCount;
 		if (commandLog)
 		  {
-		    if constexpr (sizeof(URV) == 4)
-		      fprintf(commandLog, "load_finished 0x%x %d\n", addr,
-			      msg.flags);
-		    else
-		      fprintf(commandLog, "load_finished 0x%lx %d\n", addr,
-			      msg.flags);
+		    fprintf(commandLog, "hart=%d load_finished 0x%0*" PRIx64 " %d # ts=%s\n",
+			    hart,
+			    ( (sizeof(URV) == 4) ? 8 : 16 ), uint64_t(addr),
+			    msg.flags, timeStamp.c_str());
 		  }
 		break;
 	      }

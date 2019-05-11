@@ -22,17 +22,31 @@
 #include <cfenv>
 #include <cmath>
 #include <map>
+#include <mutex>
 #include <boost/format.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
+
+// On pure 32-bit machines, use boost for 128-bit integer type.
+#if __x86_64__
+  typedef __int128_t Int128;
+  typedef __uint128_t Uint128;
+#else
+  #include <boost/multiprecision/cpp_int.hpp>
+  boost::multiprecision::int128_t Int128;
+  boost::multiprecision::uint128_t Uint128;
+#endif
+
 #include <string.h>
 #include <time.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/uio.h>
-#include <sys/utsname.h>
+
 #include <assert.h>
 #include <signal.h>
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 #include "Core.hpp"
 #include "instforms.hpp"
 
@@ -73,7 +87,7 @@ Core<URV>::Core(unsigned hartId, Memory& memory, unsigned intRegCount)
   regionHasLocalMem_.resize(16);
   regionHasLocalDataMem_.resize(16);
 
-  // Tie the retired instruction and cycle counter CSRs to variable
+  // Tie the retired instruction and cycle counter CSRs to variables
   // held in the core.
   if constexpr (sizeof(URV) == 4)
     {
@@ -100,6 +114,8 @@ Core<URV>::Core(unsigned hartId, Memory& memory, unsigned intRegCount)
       csRegs_.regs_.at(size_t(CsrNumber::MINSTRET)).tie(&retiredInsts_);
       csRegs_.regs_.at(size_t(CsrNumber::MCYCLE)).tie(&cycleCount_);
     }
+
+  csRegs_.configCsr(CsrNumber::MHARTID, true, hartId, 0, 0, false);
 }
 
 
@@ -386,14 +402,13 @@ template <typename URV>
 void
 Core<URV>::setPendingNmi(NmiCause cause)
 {
-  nmiPending_ = true;
-
-  if (nmiCause_ == NmiCause::STORE_EXCEPTION or
-      nmiCause_ == NmiCause::LOAD_EXCEPTION)
-    ;  // Load/store exception is sticky -- do not over-write it.
-  else
+  // First nmi sets the cause. The cause is sticky.
+  if (not nmiPending_)
     nmiCause_ = cause;
 
+  nmiPending_ = true;
+
+  // Set the nmi pending bit in the DCSR register.
   URV val = 0;  // DCSR value
   if (peekCsr(CsrNumber::DCSR, val))
     {
@@ -886,7 +901,7 @@ Core<URV>::applyLoadFinished(URV addr, bool matchOldest, unsigned& matches)
 
   LoadInfo& entry = loadQueue_.at(matchIx);
 
-  // Process entries in reverse order (start with youngest)
+  // Process entries in reverse order (start with oldest)
   // Mark all earlier entries with same target register as invalid.
   // Identify earliest previous value of target register.
   unsigned targetReg = entry.regIx_;
@@ -948,19 +963,19 @@ printUnsignedHisto(const char* tag, const std::vector<uint64_t>& histo,
     return;
 
   if (histo.at(0))
-    fprintf(file, "    %s  0          %ld\n", tag, histo.at(0));
+    fprintf(file, "    %s  0          %" PRId64 "\n", tag, histo.at(0));
   if (histo.at(1))
-    fprintf(file, "    %s  1          %ld\n", tag, histo.at(1));
+    fprintf(file, "    %s  1          %" PRId64 "\n", tag, histo.at(1));
   if (histo.at(2))
-    fprintf(file, "    %s  2          %ld\n", tag, histo.at(2));
+    fprintf(file, "    %s  2          %" PRId64 "\n", tag, histo.at(2));
   if (histo.at(3))
-    fprintf(file, "    %s  (2,   16]  %ld\n", tag, histo.at(3));
+    fprintf(file, "    %s  (2,   16]  %" PRId64 "\n", tag, histo.at(3));
   if (histo.at(4))
-    fprintf(file, "    %s  (16,  1k]  %ld\n", tag, histo.at(4));
+    fprintf(file, "    %s  (16,  1k]  %" PRId64 "\n", tag, histo.at(4));
   if (histo.at(5))
-    fprintf(file, "    %s  (1k, 64k]  %ld\n", tag, histo.at(5));
+    fprintf(file, "    %s  (1k, 64k]  %" PRId64 "\n", tag, histo.at(5));
   if (histo.at(6))
-    fprintf(file, "    %s  > 64k      %ld\n", tag, histo.at(6));
+    fprintf(file, "    %s  > 64k      %" PRId64 "\n", tag, histo.at(6));
 }
 
 
@@ -973,31 +988,31 @@ printSignedHisto(const char* tag, const std::vector<uint64_t>& histo,
     return;
 
   if (histo.at(0))
-    fprintf(file, "    %s <= 64k      %ld\n", tag, histo.at(0));
+    fprintf(file, "    %s <= 64k      %" PRId64 "\n", tag, histo.at(0));
   if (histo.at(1))
-    fprintf(file, "    %s (-64k, -1k] %ld\n", tag, histo.at(1));
+    fprintf(file, "    %s (-64k, -1k] %" PRId64 "\n", tag, histo.at(1));
   if (histo.at(2))
-    fprintf(file, "    %s (-1k,  -16] %ld\n", tag, histo.at(2));
+    fprintf(file, "    %s (-1k,  -16] %" PRId64 "\n", tag, histo.at(2));
   if (histo.at(3))
-    fprintf(file, "    %s (-16,   -3] %ld\n", tag, histo.at(3));
+    fprintf(file, "    %s (-16,   -3] %" PRId64 "\n", tag, histo.at(3));
   if (histo.at(4))
-    fprintf(file, "    %s -2          %ld\n", tag, histo.at(4));
+    fprintf(file, "    %s -2          %" PRId64 "\n", tag, histo.at(4));
   if (histo.at(5))
-    fprintf(file, "    %s -1          %ld\n", tag, histo.at(5));
+    fprintf(file, "    %s -1          %" PRId64 "\n", tag, histo.at(5));
   if (histo.at(6))
-    fprintf(file, "    %s 0           %ld\n", tag, histo.at(6));
+    fprintf(file, "    %s 0           %" PRId64 "\n", tag, histo.at(6));
   if (histo.at(7))
-    fprintf(file, "    %s 1           %ld\n", tag, histo.at(7));
+    fprintf(file, "    %s 1           %" PRId64 "\n", tag, histo.at(7));
   if (histo.at(8))
-    fprintf(file, "    %s 2           %ld\n", tag, histo.at(8));
+    fprintf(file, "    %s 2           %" PRId64 "\n", tag, histo.at(8));
   if (histo.at(9))
-    fprintf(file, "    %s (2,     16] %ld\n", tag, histo.at(9));
+    fprintf(file, "    %s (2,     16] %" PRId64 "\n", tag, histo.at(9));
   if (histo.at(10))
-    fprintf(file, "    %s (16,    1k] %ld\n", tag, histo.at(10));
-  if (histo.at(11))
-    fprintf(file, "    %s (1k,   64k] %ld\n", tag, histo.at(11));
-  if (histo.at(12))
-    fprintf(file, "    %s > 64k       %ld\n", tag, histo.at(12));
+    fprintf(file, "    %s (16,    1k] %" PRId64 "\n", tag, histo.at(10));
+  if (histo.at(11))	              
+    fprintf(file, "    %s (1k,   64k] %" PRId64 "\n", tag, histo.at(11));
+  if (histo.at(12))	              
+    fprintf(file, "    %s > 64k       %" PRId64 "\n", tag, histo.at(12));
 }
 
 
@@ -1034,7 +1049,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
       if (not freq)
 	continue;
 
-      fprintf(file, "%s %ld\n", info.name().c_str(), freq);
+      fprintf(file, "%s %" PRId64 "\n", info.name().c_str(), freq);
 
       auto regCount = intRegCount();
 
@@ -1045,7 +1060,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rd");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rd_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rd_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rd_.at(i));
 	  fprintf(file, "\n");
 	}
 
@@ -1056,7 +1071,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rs1");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rs1_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rs1_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rs1_.at(i));
 	  fprintf(file, "\n");
 
 	  const auto& histo = prof.rs1Histo_;
@@ -1073,7 +1088,7 @@ Core<URV>::reportInstructionFrequency(FILE* file) const
 	  fprintf(file, "  +rs2");
 	  for (unsigned i = 0; i < regCount; ++i)
 	    if (prof.rs2_.at(i))
-	      fprintf(file, " %d:%ld", i, prof.rs2_.at(i));
+	      fprintf(file, " %d:%" PRId64, i, prof.rs2_.at(i));
 	  fprintf(file, "\n");
 
 	  const auto& histo = prof.rs2Histo_;
@@ -1120,7 +1135,15 @@ Core<URV>::initiateLoadException(ExceptionCause cause, URV addr, unsigned size)
     putInLoadQueue(size, addr, 0, 0);
 
   forceAccessFail_ = false;
-  ldStException_ = true;
+  initiateException(cause, currPc_, addr);
+}
+
+
+template <typename URV>
+void
+Core<URV>::initiateStoreException(ExceptionCause cause, URV addr)
+{
+  forceAccessFail_ = false;
   initiateException(cause, currPc_, addr);
 }
 
@@ -1469,6 +1492,7 @@ Core<URV>::initiateException(ExceptionCause cause, URV pc, URV info)
 {
   bool interrupt = false;
   exceptionCount_++;
+  hasException_ = true;
   initiateTrap(interrupt, URV(cause), pc, info);
 
   PerfRegs& pregs = csRegs_.mPerfRegs_;
@@ -1660,7 +1684,7 @@ Core<URV>::peekIntReg(unsigned ix, URV& val, std::string& name) const
   if (ix < intRegs_.size())
     {
       val = intRegs_.read(ix);
-      name = intRegs_.regName(ix, abiNames_);
+      name = intRegName(ix);
       return true;
     }
   return false;
@@ -1915,9 +1939,15 @@ template <typename URV>
 void
 formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
 		const char* opcode, char resource, URV addr,
-		URV value, const char* assembly)
+		URV value, const char* assembly);
+
+template <>
+void
+formatInstTrace<uint32_t>(FILE* out, uint64_t tag, unsigned hartId, uint32_t currPc,
+		const char* opcode, char resource, uint32_t addr,
+		uint32_t value, const char* assembly)
 {
-  if constexpr (sizeof(URV) == 4)
+  if (resource == 'r')
     {
       if (resource == 'r')
 	{
@@ -1946,28 +1976,53 @@ formatInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
     }
 }
 
+template <>
+void
+formatInstTrace<uint64_t>(FILE* out, uint64_t tag, unsigned hartId, uint64_t currPc,
+		const char* opcode, char resource, uint64_t addr,
+		uint64_t value, const char* assembly)
+{
+  fprintf(out, "#%" PRId64 " %d %016" PRIx64 " %8s %c %016" PRIx64 " %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, resource, addr, value, assembly);
+}
 
 template <typename URV>
 void
 formatFpInstTrace(FILE* out, uint64_t tag, unsigned hartId, URV currPc,
 		  const char* opcode, unsigned fpReg,
+		  uint64_t fpVal, const char* assembly);
+
+template <>
+void
+formatFpInstTrace<uint32_t>(FILE* out, uint64_t tag, unsigned hartId, uint32_t currPc,
+		  const char* opcode, unsigned fpReg,
 		  uint64_t fpVal, const char* assembly)
 {
-  if constexpr (sizeof(URV) == 4)
-    fprintf(out, "#%ld %d %08x %8s f %02x %016lx  %s",
-	    tag, hartId, currPc, opcode, fpReg, fpVal, assembly);
-
-  else
-    fprintf(out, "#%ld %d %016lx %8s f %016lx %016lx  %s",
-	    tag, hartId, currPc, opcode, uint64_t(fpReg), fpVal, assembly);
+  fprintf(out, "#%" PRId64 " %d %08x %8s f %02x %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, fpReg, fpVal, assembly);
 }
 
+template <>
+void
+formatFpInstTrace<uint64_t>(FILE* out, uint64_t tag, unsigned hartId, uint64_t currPc,
+		  const char* opcode, unsigned fpReg,
+		  uint64_t fpVal, const char* assembly)
+{
+  fprintf(out, "#%" PRId64 " %d %016" PRIx64 " %8s f %016" PRIx64 " %016" PRIx64 "  %s",
+          tag, hartId, currPc, opcode, uint64_t(fpReg), fpVal, assembly);
+}
+
+
+static std::mutex printInstTraceMutex;
 
 template <typename URV>
 void
 Core<URV>::printInstTrace(uint32_t inst, uint64_t tag, std::string& tmp,
 			  FILE* out, bool interrupt)
 {
+  // Serialize to avoid jumbled output.
+  std::lock_guard<std::mutex> guard(printInstTraceMutex);
+
   disassembleInst(inst, tmp);
   if (interrupt)
     tmp += " (interrupted)";
@@ -2158,6 +2213,13 @@ void
 Core<URV>::updatePerformanceCounters(uint32_t inst, const InstInfo& info,
 				     uint32_t op0, uint32_t op1)
 {
+  // We do not update the performance counters if an instruction
+  // causes an exception unless it is an ebreak or an ecall.
+  InstId id = info.instId();
+  if (hasException_ and id != InstId::ecall and id != InstId::ebreak and
+      id != InstId::c_ebreak)
+    return;
+
   PerfRegs& pregs = csRegs_.mPerfRegs_;
   pregs.updateCounters(EventNumber::InstCommited);
 
@@ -2168,8 +2230,6 @@ Core<URV>::updatePerformanceCounters(uint32_t inst, const InstInfo& info,
 
   if ((currPc_ & 3) == 0)
     pregs.updateCounters(EventNumber::InstAligned);
-
-  InstId id = info.instId();
 
   if (info.type() == InstType::Int)
     {
@@ -2187,9 +2247,13 @@ Core<URV>::updatePerformanceCounters(uint32_t inst, const InstInfo& info,
 	pregs.updateCounters(EventNumber::Alu);
     }
   else if (info.isMultiply())
-    pregs.updateCounters(EventNumber::Mult);
+    {
+      pregs.updateCounters(EventNumber::Mult);
+    }
   else if (info.isDivide())
-    pregs.updateCounters(EventNumber::Div);
+    {
+      pregs.updateCounters(EventNumber::Div);
+    }
   else if (info.isLoad())
     {
       pregs.updateCounters(EventNumber::Load);
@@ -2202,7 +2266,16 @@ Core<URV>::updatePerformanceCounters(uint32_t inst, const InstInfo& info,
       if (misalignedLdSt_)
 	pregs.updateCounters(EventNumber::MisalignStore);
     }
-  else if (info.isCsr() and not csrException_)
+  else if (info.isAtomic())
+    {
+      if (id == InstId::lr_w or id == InstId::lr_d)
+	pregs.updateCounters(EventNumber::Lr);
+      else if (id == InstId::sc_w or id == InstId::sc_d)
+	pregs.updateCounters(EventNumber::Sc);
+      else
+	pregs.updateCounters(EventNumber::Atomic);
+    }
+  else if (info.isCsr() and not hasException_)
     {
       if ((id == InstId::csrrw or id == InstId::csrrwi))
 	{
@@ -2260,13 +2333,19 @@ template <typename URV>
 void
 Core<URV>::accumulateInstructionStats(uint32_t inst)
 {
-  uint32_t op0 = 0, op1 = 0; int32_t op2 = 0;
-  const InstInfo& info = decode(inst, op0, op1, op2);
-  InstId id = info.instId();
+  uint32_t op0 = 0, op1 = 0; int32_t op2 = 0, op3 = 0;
+  const InstInfo& info = decode(inst, op0, op1, op2, op3);
 
   if (enableCounters_ and prevCountersCsrOn_)
     updatePerformanceCounters(inst, info, op0, op1);
   prevCountersCsrOn_ = countersCsrOn_;
+
+  // We do not update the instruction stats if an instruction causes
+  // an exception unless it is an ebreak or an ecall.
+  InstId id = info.instId();
+  if (hasException_ and id != InstId::ecall and id != InstId::ebreak and
+      id != InstId::c_ebreak)
+    return;
 
   misalignedLdSt_ = false;
   lastBranchTaken_ = false;
@@ -2566,6 +2645,26 @@ Core<URV>::takeTriggerAction(FILE* traceFile, URV pc, URV info,
 }
 
 
+/// Report the number of retired instruction count and the simulation
+/// rate.
+static void
+reportInstsPerSec(uint64_t instCount, double elapsed, bool keyboardInterrupt)
+{
+  std::lock_guard<std::mutex> guard(printInstTraceMutex);
+
+  std::cout.flush();
+
+  if (keyboardInterrupt)
+    std::cerr << "Keyboard interrupt\n";
+  std::cerr << "Retired " << instCount << " instruction"
+	    << (instCount > 1? "s" : "") << " in "
+	    << (boost::format("%.2fs") % elapsed);
+  if (elapsed > 0)
+    std::cerr << "  " << size_t(double(instCount)/elapsed) << " inst/s";
+  std::cerr << '\n';
+}
+
+
 // This is set to false when user hits control-c to interrupt a long
 // run.
 volatile static bool userOk = true;
@@ -2609,8 +2708,7 @@ Core<URV>::untilAddress(URV address, FILE* traceFile)
 
 	  loadAddrValid_ = false;
 	  triggerTripped_ = false;
-	  ldStException_ = false;
-	  csrException_ = false;
+	  hasException_ = false;
 
 	  ++counter;
 
@@ -2660,7 +2758,7 @@ Core<URV>::untilAddress(URV address, FILE* traceFile)
 
 	  ++cycleCount_;
 
-	  if (ldStException_)
+	  if (hasException_)
 	    {
 	      if (traceFile)
 		{
@@ -2710,14 +2808,20 @@ Core<URV>::untilAddress(URV address, FILE* traceFile)
 		  clearTraceData();
 		}
 	      success = ce.value() == 1; // Anything besides 1 is a fail.
-	      std::cerr << (success? "Successful " : "Error: Failed ")
-			<< "stop: " << std::dec << ce.what() << "\n";
-	      setTargetProgramFinished(true);
+	      {
+		std::lock_guard<std::mutex> guard(printInstTraceMutex);
+		std::cerr << (success? "Successful " : "Error: Failed ")
+			  << "stop: " << ce.what() << ": " << ce.value()
+			  << "\n";
+		setTargetProgramFinished(true);
+	      }
 	      break;
 	    }
 	  if (ce.type() == CoreException::Exit)
 	    {
-	      std::cerr << "Target program exited with code " << ce.value() << '\n';
+	      std::lock_guard<std::mutex> guard(printInstTraceMutex);
+	      std::cerr << "Target program exited with code " << ce.value()
+			<< '\n';
 	      setTargetProgramFinished(true);
 	      break;
 	    }
@@ -2742,6 +2846,17 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   uint64_t limit = instCountLim_;
   uint64_t counter0 = counter_;
 
+#ifdef __MINGW64__
+  __p_sig_fn_t oldAction = nullptr;
+  __p_sig_fn_t newAction = keyboardInterruptHandler;
+
+  userOk = true;
+  oldAction = signal(SIGINT, newAction);
+
+  bool success = untilAddress(address, traceFile);
+
+  signal(SIGINT, oldAction);
+#else
   struct sigaction oldAction;
   struct sigaction newAction;
   memset(&newAction, 0, sizeof(newAction));
@@ -2753,6 +2868,7 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
   bool success = untilAddress(address, traceFile);
 
   sigaction(SIGINT, &oldAction, nullptr);
+#endif
 
   if (counter_ == limit)
     std::cerr << "Stopped -- Reached instruction limit\n";
@@ -2767,16 +2883,7 @@ Core<URV>::runUntilAddress(URV address, FILE* traceFile)
 
   uint64_t numInsts = counter_ - counter0;
 
-  std::cout.flush();
-  if (not userOk)
-    std::cerr << "Keyboard interrupt\n";
-  std::cerr << "Retired " << numInsts << " instruction"
-	    << (numInsts > 1? "s" : "") << " in "
-	    << (boost::format("%.2fs") % elapsed);
-  if (elapsed > 0)
-    std::cerr << "  " << size_t(double(numInsts)/elapsed) << " inst/s";
-  std::cerr << '\n';
-
+  reportInstsPerSec(numInsts, elapsed, not userOk);
   return success;
 }
 
@@ -2794,7 +2901,7 @@ Core<URV>::simpleRun()
 	  // Fetch instruction
 	  currPc_ = pc_;
 	  ++cycleCount_;
-	  ldStException_ = false;
+	  hasException_ = false;
 
 	  uint32_t inst;
 	  if (not fetchInst(pc_, inst))
@@ -2812,18 +2919,20 @@ Core<URV>::simpleRun()
 	      execute16(uint16_t(inst));
 	    }
 
-	  if (not ldStException_)
+	  if (not hasException_)
 	    ++retiredInsts_;
 	}
     }
   catch (const CoreException& ce)
     {
+      std::lock_guard<std::mutex> guard(printInstTraceMutex);
+
       if (ce.type() == CoreException::Stop)
 	{
 	  ++retiredInsts_;
 	  success = ce.value() == 1; // Anything besides 1 is a fail.
 	  std::cerr << (success? "Successful " : "Error: Failed ")
-		    << "stop: " << std::dec << ce.what() << '\n';
+		    << "stop: " << ce.what() << ": " << ce.value() << '\n';
 	  setTargetProgramFinished(true);
 	}
       else if (ce.type() == CoreException::Exit)
@@ -2868,6 +2977,17 @@ Core<URV>::run(FILE* file)
   struct timeval t0;
   gettimeofday(&t0, nullptr);
 
+#ifdef __MINGW64__
+  __p_sig_fn_t oldAction = nullptr;
+  __p_sig_fn_t newAction = keyboardInterruptHandler;
+
+  userOk = true;
+  oldAction = signal(SIGINT, newAction);
+
+  bool success = simpleRun();
+
+  signal(SIGINT, oldAction);
+#else
   struct sigaction oldAction;
   struct sigaction newAction;
   memset(&newAction, 0, sizeof(newAction));
@@ -2879,6 +2999,7 @@ Core<URV>::run(FILE* file)
   bool success = simpleRun();
 
   sigaction(SIGINT, &oldAction, nullptr);
+#endif
 
   // Simulator stats.
   struct timeval t1;
@@ -2886,15 +3007,7 @@ Core<URV>::run(FILE* file)
   double elapsed = (double(t1.tv_sec - t0.tv_sec) +
 		    double(t1.tv_usec - t0.tv_usec)*1e-6);
 
-  std::cout.flush();
-  if (not userOk)
-    std::cerr << "Keyboard interrupt\n";
-  std::cerr << "Retired " << retiredInsts_ << " instruction"
-	    << (retiredInsts_ > 1? "s" : "") << " in "
-	    << (boost::format("%.2fs") % elapsed);
-  if (elapsed > 0)
-    std::cerr << "  " << size_t(double(retiredInsts_)/elapsed) << " inst/s";
-  std::cerr << '\n';
+  reportInstsPerSec(retiredInsts_, elapsed, not userOk);
 
   return success;
 }
@@ -3035,9 +3148,8 @@ Core<URV>::singleStep(FILE* traceFile)
 
       loadAddrValid_ = false;
       triggerTripped_ = false;
-      ldStException_ = false;
-      csrException_ = false;
-      ebreakInst_ = false;
+      hasException_ = false;
+      ebreakInstDebug_ = false;
 
       ++counter_;
 
@@ -3092,11 +3204,13 @@ Core<URV>::singleStep(FILE* traceFile)
 
       ++cycleCount_;
 
-      if (ldStException_)
+      if (hasException_)
 	{
+	  if (doStats)
+	    accumulateInstructionStats(inst);
 	  if (traceFile)
 	    printInstTrace(inst, counter_, instStr, traceFile);
-	  if (dcsrStep_)
+	  if (dcsrStep_ and not ebreakInstDebug_)
 	    enterDebugMode(DebugModeCause::STEP, pc_);
 	  return;
 	}
@@ -3122,8 +3236,8 @@ Core<URV>::singleStep(FILE* traceFile)
       // load queue (because in such a case the hardware will stall
       // till load is completed). Source operands of load instructions
       // are handled in the load and loadRserve methods.
-      uint32_t op0 = 0, op1 = 0; int32_t op2 = 0;
-      const InstInfo& info = decode(inst, op0, op1, op2);
+      uint32_t op0 = 0, op1 = 0; int32_t op2 = 0, op3 = 0;
+      const InstInfo& info = decode(inst, op0, op1, op2, op3);
       if (not info.isLoad())
 	{
 	  if (info.isIthOperandIntRegSource(0))
@@ -3149,7 +3263,7 @@ Core<URV>::singleStep(FILE* traceFile)
 	}
 
       // If step bit set in dcsr then enter debug mode unless already there.
-      if (dcsrStep_ and not ebreakInst_)
+      if (dcsrStep_ and not ebreakInstDebug_)
 	enterDebugMode(DebugModeCause::STEP, pc_);
     }
   catch (const CoreException& ce)
@@ -3165,6 +3279,7 @@ Core<URV>::singleStep(FILE* traceFile)
 	}
       else if (ce.type() == CoreException::Exit)
 	{
+	  std::lock_guard<std::mutex> guard(printInstTraceMutex);
 	  std::cerr << "Target program exited with code " << ce.value() << '\n';
 	  setTargetProgramFinished(true);
 	}
@@ -3204,7 +3319,7 @@ Core<URV>::whatIfSingleStep(uint32_t inst, ChangeRecord& record)
   bool result = exceptionCount_ == prevExceptionCount;
 
   // If step bit set in dcsr then enter debug mode unless already there.
-  if (dcsrStep_ and not ebreakInst_)
+  if (dcsrStep_ and not ebreakInstDebug_)
     enterDebugMode(DebugModeCause::STEP, pc_);
 
   // Collect changes. Undo each collected change.
@@ -3663,6 +3778,14 @@ Core<URV>::execute32(uint32_t inst)
 	iform.getShiftFields(isRv64(), topBits, shamt);
 	if (topBits == 0)
 	  execSlli(rd, rs1, shamt);
+	else if ((topBits >> 1) == 4)
+	  execSloi(rd, rs1, shamt);
+	else if (imm == 0x600)
+	  execClz(rd, rs1, 0);
+	else if (imm == 0x601)
+	  execCtz(rd, rs1, 0);
+	else if (imm == 0x602)
+	  execPcnt(rd, rs1, 0);
 	else
 	  illegalInst();
       }
@@ -3675,6 +3798,10 @@ Core<URV>::execute32(uint32_t inst)
 	iform.getShiftFields(isRv64(), topBits, shamt);
 	if (topBits == 0)
 	  execSrli(rd, rs1, shamt);
+	else if ((topBits >> 1) == 4)
+	  execSroi(rd, rs1, shamt);
+	else if ((topBits >> 1) == 0xc)
+	  execRori(rd, rs1, shamt);
 	else
 	  {
 	    if (isRv64())
@@ -3816,10 +3943,36 @@ Core<URV>::execute32(uint32_t inst)
 	else if (funct3 == 6) execRem(rd, rs1, rs2);
 	else if (funct3 == 7) execRemu(rd, rs1, rs2);
       }
+    else if (funct7 == 4)
+      {
+	if      (funct3 == 0) execPack(rd, rs1, rs2);
+	else                  illegalInst();
+      }
+    else if (funct7 == 5)
+      {
+	if      (funct3 == 2) execMin(rd, rs1, rs2);
+	else if (funct3 == 3) execMinu(rd, rs1, rs2);
+	else if (funct3 == 6) execMax(rd, rs1, rs2);
+	else if (funct3 == 7) execMaxu(rd, rs1, rs2);
+	else                  illegalInst();
+      }
+    else if (funct7 == 0x10)
+      {
+	if      (funct3 == 1) execSlo(rd, rs1, rs2);
+	else if (funct3 == 5) execSro(rd, rs1, rs2);
+	else                  illegalInst();
+      }
     else if (funct7 == 0x20)
       {
 	if      (funct3 == 0) execSub(rd, rs1, rs2);
 	else if (funct3 == 5) execSra(rd, rs1, rs2);
+	else if (funct3 == 7) execAndc(rd, rs1, rs2);
+	else                  illegalInst();
+      }
+    else if (funct7 == 0x30)
+      {
+	if      (funct3 == 1) execRol(rd, rs1, rs2);
+	if      (funct3 == 5) execRor(rd, rs1, rs2);
 	else                  illegalInst();
       }
     else
@@ -4597,2489 +4750,6 @@ Core<URV>::expandInst(uint16_t inst, uint32_t& code32) const
 
 
 template <typename URV>
-const InstInfo&
-Core<URV>::decodeFp(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
-{
-  if (not isRvf())
-    return instTable_.getInstInfo(InstId::illegal);
-
-  RFormInst rform(inst);
-  op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
-  unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-  instRoundingMode_ = RoundingMode(f3);
-  if (f7 & 1)
-    {
-      if (not isRvd())
-	return instTable_.getInstInfo(InstId::illegal);
-
-      if (f7 == 1)              return instTable_.getInstInfo(InstId::fadd_d);
-      if (f7 == 5)              return instTable_.getInstInfo(InstId::fsub_d);
-      if (f7 == 9)              return instTable_.getInstInfo(InstId::fmul_d);
-      if (f7 == 0xd)            return instTable_.getInstInfo(InstId::fdiv_d);
-      if (f7 == 0x11)
-	{
-	  if (f3 == 0)          return instTable_.getInstInfo(InstId::fsgnj_d);
-	  if (f3 == 1)          return instTable_.getInstInfo(InstId::fsgnjn_d);
-	  if (f3 == 2)          return instTable_.getInstInfo(InstId::fsgnjx_d);
-	}
-      if (f7 == 0x15)
-	{
-	  if (f3 == 0)          return instTable_.getInstInfo(InstId::fmin_d);
-	  if (f3 == 1)          return instTable_.getInstInfo(InstId::fmax_d);
-	}
-      if (f7==0x21 and op2==0)  return instTable_.getInstInfo(InstId::fcvt_d_s);
-      if (f7 == 0x2d)           return instTable_.getInstInfo(InstId::fsqrt_d);
-      if (f7 == 0x51)
-	{
-	  if (f3 == 0)          return instTable_.getInstInfo(InstId::fle_d);
-	  if (f3 == 1)          return instTable_.getInstInfo(InstId::flt_d);
-	  if (f3 == 2)          return instTable_.getInstInfo(InstId::feq_d);
-	}
-      if (f7 == 0x61)
-	{
-	  if (op2 == 0)         return instTable_.getInstInfo(InstId::fcvt_w_d);
-	  if (op2 == 1)         return instTable_.getInstInfo(InstId::fcvt_wu_d);
-	  if (op2 == 2)         return instTable_.getInstInfo(InstId::fcvt_l_d);
-	  if (op2 == 3)         return instTable_.getInstInfo(InstId::fcvt_lu_d);
-	}
-      if (f7 == 0x69)
-	{
-	  if (op2 == 0)         return instTable_.getInstInfo(InstId::fcvt_d_w);
-	  if (op2 == 1)         return instTable_.getInstInfo(InstId::fcvt_d_wu);
-	  if (op2 == 2)         return instTable_.getInstInfo(InstId::fcvt_d_l);
-	  if (op2 == 3)         return instTable_.getInstInfo(InstId::fcvt_d_lu);
-	}
-      if (f7 == 0x71)
-	{
-	  if (op2==0 and f3==0) return instTable_.getInstInfo(InstId::fmv_x_d);
-	  if (op2==0 and f3==1) return instTable_.getInstInfo(InstId::fclass_d);
-	}
-      if (f7 == 0x74)
-	if (op2==0 and f3==0)   return instTable_.getInstInfo(InstId::fmv_w_x);
-      if (f7 == 0x79)
-	if (op2==0 and f3==0)   return instTable_.getInstInfo(InstId::fmv_d_x);
-
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-
-  if (f7 == 0)      return instTable_.getInstInfo(InstId::fadd_s);
-  if (f7 == 4)      return instTable_.getInstInfo(InstId::fsub_s);
-  if (f7 == 8)      return instTable_.getInstInfo(InstId::fmul_s);
-  if (f7 == 0xc)    return instTable_.getInstInfo(InstId::fdiv_s);
-  if (f7 == 0x2c)   return instTable_.getInstInfo(InstId::fsqrt_s);
-  if (f7 == 0x10)
-    {
-      if (f3 == 0)  return instTable_.getInstInfo(InstId::fsgnj_s);
-      if (f3 == 1)  return instTable_.getInstInfo(InstId::fsgnjn_s);
-      if (f3 == 2)  return instTable_.getInstInfo(InstId::fsgnjx_s);
-    }
-  if (f7 == 0x14)
-    {
-      if (f3 == 0)  return instTable_.getInstInfo(InstId::fmin_s);
-      if (f3 == 1)  return instTable_.getInstInfo(InstId::fmax_s);
-    }
-  if (f7 == 0x50)
-    {
-      if (f3 == 0)  return instTable_.getInstInfo(InstId::fle_s);
-      if (f3 == 1)  return instTable_.getInstInfo(InstId::flt_s);
-      if (f3 == 2)  return instTable_.getInstInfo(InstId::feq_s);
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-  if (f7 == 0x60)
-    {
-      if (op2 == 0) return instTable_.getInstInfo(InstId::fcvt_w_s);
-      if (op2 == 1) return instTable_.getInstInfo(InstId::fcvt_wu_s);
-      if (op2 == 2) return instTable_.getInstInfo(InstId::fcvt_l_s);
-      if (op2 == 3) return instTable_.getInstInfo(InstId::fcvt_lu_s);
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-  if (f7 == 0x68)
-    {
-      if (op2 == 0) return instTable_.getInstInfo(InstId::fcvt_s_w);
-      if (op2 == 1) return instTable_.getInstInfo(InstId::fcvt_s_wu);
-      if (op2 == 2) return instTable_.getInstInfo(InstId::fcvt_s_l);
-      if (op2 == 3) return instTable_.getInstInfo(InstId::fcvt_s_lu);
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-  if (f7 == 0x70)
-    {
-      if (op2 == 0)
-	{
-	  if (f3 == 0) return instTable_.getInstInfo(InstId::fmv_x_w);
-	  if (f3 == 1) return instTable_.getInstInfo(InstId::fclass_s);
-	}
-    }
-  if (f7 == 0x74)
-    {
-      if (op2 == 0)
-	if (f3 == 0) return instTable_.getInstInfo(InstId::fmv_w_x);
-    }
-  return instTable_.getInstInfo(InstId::illegal);
-}
-
-
-template <typename URV>
-const InstInfo&
-Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
-{
-  uint16_t quadrant = inst & 0x3;
-  uint16_t funct3 =  uint16_t(inst >> 13);    // Bits 15 14 and 13
-
-  op0 = 0; op1 = 0; op2 = 0;
-
-  if (quadrant == 0)
-    {
-      if (funct3 == 0)    // illegal, c.addi4spn
-	{
-	  if (inst == 0)
-	    return instTable_.getInstInfo(InstId::illegal);
-	  CiwFormInst ciwf(inst);
-	  unsigned immed = ciwf.immed();
-	  if (immed == 0)
-	    return instTable_.getInstInfo(InstId::illegal);
-	  op0 = 8 + ciwf.bits.rdp; op1 = RegSp; op2 = immed;
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_addi4spn);
-	}
-
-      if (funct3 == 1) // c.fld c.lq
-	{
-	  if (not isRvd())
-	    return instTable_.getInstInfo(InstId::illegal);
-	  ClFormInst clf(inst);
-	  op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.ldImmed();
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_fld);
-	}
-
-      if (funct3 == 2) // c.lw
-	{
-	  ClFormInst clf(inst);
-	  op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.lwImmed();
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_lw);
-	}
-
-      if (funct3 == 3) // c.flw, c.ld
-	{
-	  ClFormInst clf(inst);
-	  if (isRv64())
-	    {
-	      op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.ldImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_ld);
-	    }
-
-	  // c.flw
-	  if (isRvf())
-	    {
-	      op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p;
-	      op2 = clf.lwImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_flw);
-	    }
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      if (funct3 == 6)  // c.sw
-	{
-	  CsFormInst cs(inst);
-	  op0 = 8+cs.bits.rs1p; op1 = 8+cs.bits.rs2p; op2 = cs.swImmed();
-    isSType = true;
-	  return instTable_.getInstInfo(InstId::c_sw);
-	}
-
-      if (funct3 == 7) // c.fsw, c.sd
-	{
-	  CsFormInst cs(inst);  // Double check this
-	  if (not isRv64())
-	    {
-	      if (isRvf())
-		{
-		  op0=8+cs.bits.rs1p; op1=8+cs.bits.rs2p; op2 = cs.swImmed();
-		  return instTable_.getInstInfo(InstId::c_fsw);
-		}
-	      return instTable_.getInstInfo(InstId::illegal);
-	    }
-	  op0=8+cs.bits.rs1p; op1=8+cs.bits.rs2p; op2 = cs.sdImmed();
-    isSType = true;
-	  return instTable_.getInstInfo(InstId::c_sd);
-	}
-
-      // funct3 is 1 (c.fld c.lq), or 4 (reserved), or 5 (c.fsd c.sq)
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-
-  if (quadrant == 1)
-    {
-      if (funct3 == 0)  // c.nop, c.addi
-	{
-	  CiFormInst cif(inst);
-	  op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = cif.addiImmed();
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_addi);
-	}
-
-      if (funct3 == 1)  // c.jal,  in rv64 and rv128 this is c.addiw
-	{
-	  if (isRv64())
-	    {
-	      CiFormInst cif(inst);
-	      if (cif.bits.rd == 0)
-		return instTable_.getInstInfo(InstId::illegal);
-	      else
-		return instTable_.getInstInfo(InstId::c_addiw);
-	    }
-	  else
-	    {
-	      CjFormInst cjf(inst);
-	      op0 = RegRa; op1 = cjf.immed(); op2 = 0;
-        isJType = true;
-	      return instTable_.getInstInfo(InstId::c_jal);
-	    }
-	}
-
-      if (funct3 == 2)  // c.li
-	{
-	  CiFormInst cif(inst);
-	  op0 = cif.bits.rd; op1 = RegX0; op2 = cif.addiImmed();
-    isUType = true;
-	  return instTable_.getInstInfo(InstId::c_li);
-	}
-
-      if (funct3 == 3)  // c.addi16sp, c.lui
-	{
-	  CiFormInst cif(inst);
-	  int immed16 = cif.addi16spImmed();
-	  if (immed16 == 0)
-	    return instTable_.getInstInfo(InstId::illegal);
-	  if (cif.bits.rd == RegSp)  // c.addi16sp
-	    {
-	      op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = immed16;
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_addi16sp);
-	    }
-	  op0 = cif.bits.rd; op1 = cif.luiImmed(); op2 = 0;
-    isUType = true;
-	  return instTable_.getInstInfo(InstId::c_lui);
-	}
-
-      // c.srli c.srli64 c.srai c.srai64 c.andi c.sub c.xor c.and
-      // c.subw c.addw
-      if (funct3 == 4)
-	{
-	  CaiFormInst caf(inst);  // compressed and immediate form
-	  int immed = caf.andiImmed();
-	  unsigned rd = 8 + caf.bits.rdp;
-	  unsigned f2 = caf.bits.funct2;
-	  if (f2 == 0) // srli64, srli
-	    {
-	      if (caf.bits.ic5 != 0 and not isRv64())
-		return instTable_.getInstInfo(InstId::illegal);
-	      op0 = rd; op1 = rd; op2 = caf.shiftImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_srli);
-	    }
-	  if (f2 == 1)  // srai64, srai
-	    {
-	      if (caf.bits.ic5 != 0 and not isRv64())
-		return instTable_.getInstInfo(InstId::illegal);
-	      op0 = rd; op1 = rd; op2 = caf.shiftImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_srai);
-	    }
-	  if (f2 == 2)  // c.andi
-	    {
-	      op0 = rd; op1 = rd; op2 = immed;
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_andi);
-	    }
-
-	  // f2 == 3: c.sub c.xor c.or c.subw c.addw
-	  unsigned rs2p = (immed & 0x7); // Lowest 3 bits of immed
-	  unsigned rs2 = 8 + rs2p;
-	  unsigned imm34 = (immed >> 3) & 3; // Bits 3 and 4 of immed
-	  op0 = rd; op1 = rd; op2 = rs2;
-	  if ((immed & 0x20) == 0)  // Bit 5 of immed
-	    {
-        isRType = true;
-	      if (imm34 == 0) return instTable_.getInstInfo(InstId::c_sub);
-	      if (imm34 == 1) return instTable_.getInstInfo(InstId::c_xor);
-	      if (imm34 == 2) return instTable_.getInstInfo(InstId::c_or);
-	      return instTable_.getInstInfo(InstId::c_and);
-	    }
-	  // Bit 5 of immed is 1
-	  if (not isRv64())
-	    return instTable_.getInstInfo(InstId::illegal);
-	  if (imm34 == 0) {
-        isRType = true;
-        return instTable_.getInstInfo(InstId::c_subw);
-    }
-	  if (imm34 == 1) {
-        isRType = true;
-        return instTable_.getInstInfo(InstId::c_addw);
-    }
-	  if (imm34 == 2) return instTable_.getInstInfo(InstId::illegal);
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      if (funct3 == 5)  // c.j
-	{
-	  CjFormInst cjf(inst);
-	  op0 = RegX0; op1 = cjf.immed(); op2 = 0;
-    isJType = true;
-	  return instTable_.getInstInfo(InstId::c_j);
-	}
-	  
-      if (funct3 == 6) // c.beqz
-	{
-	  CbFormInst cbf(inst);
-	  op0=8+cbf.bits.rs1p; op1=RegX0; op2=cbf.immed();
-    isBType = true;
-	  return instTable_.getInstInfo(InstId::c_beqz);
-	}
-      
-      // funct3 == 7: c.bnez
-      CbFormInst cbf(inst);
-      op0 = 8+cbf.bits.rs1p; op1=RegX0; op2=cbf.immed();
-      isBType = true;
-      return instTable_.getInstInfo(InstId::c_bnez);
-    }
-
-  if (quadrant == 2)
-    {
-      if (funct3 == 0)  // c.slli, c.slli64
-	{
-	  CiFormInst cif(inst);
-	  unsigned immed = unsigned(cif.slliImmed());
-	  if (cif.bits.ic5 != 0 and not isRv64())
-	    return instTable_.getInstInfo(InstId::illegal);
-	  op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = immed;
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_slli);
-	}
-
-      if (funct3 == 1)  // c.fldsp c.lqsp
-	{
-	  if (isRvd())
-	    {
-	      CiFormInst cif(inst);
-	      op0 = cif.bits.rd; op1 = RegSp, op2 = cif.ldspImmed();
-	      return instTable_.getInstInfo(InstId::c_fldsp);
-	    }
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      if (funct3 == 2) // c.lwsp
-	{
-	  CiFormInst cif(inst);
-	  unsigned rd = cif.bits.rd;
-	  // rd == 0 is legal per Andrew Watterman
-	  op0 = rd; op1 = RegSp; op2 = cif.lwspImmed();
-    isIType = true;
-	  return instTable_.getInstInfo(InstId::c_lwsp);
-	}
-
-      else  if (funct3 == 3)  // c.ldsp  c.flwsp
-	{
-	  CiFormInst cif(inst);
-	  unsigned rd = cif.bits.rd;
-	  if (isRv64())
-	    {
-	      op0 = rd; op1 = RegSp; op2 = cif.ldspImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_ldsp);
-	    }
-	  if (isRvf())
-	    {
-	      op0 = rd; op1 = RegSp; op2 = cif.lwspImmed();
-        isIType = true;
-	      return instTable_.getInstInfo(InstId::c_lwsp);
-	    }
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      if (funct3 == 4) // c.jr c.mv c.ebreak c.jalr c.add
-	{
-	  CiFormInst cif(inst);
-	  unsigned immed = cif.addiImmed();
-	  unsigned rd = cif.bits.rd;
-	  unsigned rs2 = immed & 0x1f;
-	  if ((immed & 0x20) == 0)  // c.jr or c.mv
-	    {
-	      if (rs2 == RegX0)
-		{
-		  if (rd == RegX0)
-		    return instTable_.getInstInfo(InstId::illegal);
-		  op0 = RegX0; op1 = rd; op2 = 0;
-      isIType = true;
-		  return instTable_.getInstInfo(InstId::c_jr);
-		}
-	      op0 = rd; op1 = RegX0; op2 = rs2;
-        isRType = true;
-	      return instTable_.getInstInfo(InstId::c_mv);
-	    }
-	  else  // c.ebreak, c.jalr or c.add 
-	    {
-	      if (rs2 == RegX0)
-		{
-		  if (rd == RegX0)
-		    return instTable_.getInstInfo(InstId::c_ebreak);
-		  op0 = RegRa; op1 = rd; op2 = 0;
-      isIType = true;
-		  return instTable_.getInstInfo(InstId::c_jalr);
-		}
-	      op0 = rd; op1 = rd; op2 = rs2;
-        isRType = true;
-	      return instTable_.getInstInfo(InstId::c_add);
-	    }
-	}
-
-      if (funct3 == 5)  // c.fsdsp c.sqsp
-	{
-	  if (isRvd())
-	    {
-	      CswspFormInst csw(inst);
-	      op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.sdImmed();
-	      return instTable_.getInstInfo(InstId::c_fsdsp);
-	    }
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      if (funct3 == 6) // c.swsp
-	{
-	  CswspFormInst csw(inst);
-	  op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.swImmed();
-    isSType = true;
-	  return instTable_.getInstInfo(InstId::c_swsp);
-	}
-
-      if (funct3 == 7)  // c.sdsp  c.fswsp
-	{
-	  if (isRv64())  // c.sdsp
-	    {
-	      CswspFormInst csw(inst);
-	      op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.sdImmed();
-	      return instTable_.getInstInfo(InstId::c_sdsp);
-	    }
-	  if (isRvf())   // c.fswsp
-	    {
-	      CswspFormInst csw(inst);
-	      op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.swImmed();
-	      return instTable_.getInstInfo(InstId::c_fswsp);
-	    }
-	  return instTable_.getInstInfo(InstId::illegal);
-	}
-
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-
-  return instTable_.getInstInfo(InstId::illegal); // quadrant 3
-}
-
-template <typename URV>
-const InstInfo&
-Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
-{
-  static void *opcodeLabels[] = { &&l0, &&l1, &&l2, &&l3, &&l4, &&l5,
-				  &&l6, &&l7, &&l8, &&l9, &&l10, &&l11,
-				  &&l12, &&l13, &&l14, &&l15, &&l16, &&l17,
-				  &&l18, &&l19, &&l20, &&l21, &&l22, &&l23,
-				  &&l24, &&l25, &&l26, &&l27, &&l28, &&l29,
-				  &&l30, &&l31 };
-  isRType = false;
-  isIType = false;
-  isSType = false;
-  isBType = false;
-  isUType = false;
-  isJType = false;
-
-  if (isCompressedInst(inst))
-    {
-      // return decode16(inst, op0, op1, op2);
-      if (not isRvc())
-	inst = 0; // All zeros: illegal 16-bit instruction.
-      return decode16(uint16_t(inst), op0, op1, op2);
-    }
-
-  op0 = 0; op1 = 0; op2 = 0;
-
-  bool quad3 = (inst & 0x3) == 0x3;
-  if (quad3)
-    {
-      unsigned opcode = (inst & 0x7f) >> 2;  // Upper 5 bits of opcode.
-
-      goto *opcodeLabels[opcode];
-
-
-    l0:  // 00000   I-form
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.immed(); 
-	switch (iform.fields.funct3)
-	  {
-	  case 0:  return instTable_.getInstInfo(InstId::lb);
-	  case 1:  return instTable_.getInstInfo(InstId::lh);
-	  case 2:  return instTable_.getInstInfo(InstId::lw);
-	  case 3:  return instTable_.getInstInfo(InstId::ld);
-	  case 4:  return instTable_.getInstInfo(InstId::lbu);
-	  case 5:  return instTable_.getInstInfo(InstId::lhu);
-	  case 6:  return instTable_.getInstInfo(InstId::lwu);
-	  default: return instTable_.getInstInfo(InstId::illegal);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l1:
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.immed();
-	uint32_t f3 = iform.fields.funct3;
-	if      (f3 == 2)  return instTable_.getInstInfo(InstId::flw);
-	else if (f3 == 3)  return instTable_.getInstInfo(InstId::fld);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    // Picorv32 custom instructions
-    l2: {
-      RFormInst rform(inst);
-      isRType = true;
-      op0 = rform.bits.rd;
-      op1 = rform.bits.rs1;
-      op2 = rform.bits.rs2;
-      unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-      if (funct7 == 0) {
-        if      (funct3 == 4) return instTable_.getInstInfo(InstId::getq);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      else if (funct7 == 1) {
-        if      (funct3 == 2) return instTable_.getInstInfo(InstId::setq);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      else if (funct7 == 2) {
-        if      (funct3 == 0) return instTable_.getInstInfo(InstId::retirq);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      else if (funct7 == 3) {
-        if      (funct3 == 6) return instTable_.getInstInfo(InstId::maskirq);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      else if (funct7 == 4) {
-        if      (funct3 == 4) return instTable_.getInstInfo(InstId::waitirq);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      else if (funct7 == 5) {
-        if      (funct3 == 6) return instTable_.getInstInfo(InstId::timer);
-        else    return instTable_.getInstInfo(InstId::illegal);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-    }
-    l7:
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l9:
-      {
-	SFormInst sform(inst);
-  isSType = true;
-	op0 = sform.bits.rs1;
-	op1 = sform.bits.rs2;
-	op2 = sform.immed();
-	unsigned funct3 = sform.bits.funct3;
-	if      (funct3 == 2)  return instTable_.getInstInfo(InstId::fsw);
-	else if (funct3 == 3)  return instTable_.getInstInfo(InstId::fsd);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l10:
-    l15:
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l16:
-      {
-	RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	instRoundingMode_ = RoundingMode(funct3);
-	if ((funct7 & 3) == 0)
-	  {
-	    instRs3_ = funct7 >> 2;
-	    return instTable_.getInstInfo(InstId::fmadd_s);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l17:
-      {
-	RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	instRoundingMode_ = RoundingMode(funct3);
-	if ((funct7 & 3) == 0)
-	  {
-	    instRs3_ = funct7 >> 2;
-	    return instTable_.getInstInfo(InstId::fmsub_s);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l18:
-      {
-	RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	instRoundingMode_ = RoundingMode(funct3);
-	if ((funct7 & 3) == 0)
-	  {
-	    instRs3_ = funct7 >> 2;
-	    return instTable_.getInstInfo(InstId::fnmsub_s);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l19:
-      {
-	RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	instRoundingMode_ = RoundingMode(funct3);
-	if ((funct7 & 3) == 0)
-	  {
-	    instRs3_ = funct7 >> 2;
-	    return instTable_.getInstInfo(InstId::fnmadd_s);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l20:
-      return decodeFp(inst, op0, op1, op2);
-
-    l21:
-    l22:
-    l23:
-    l26:
-    l29:
-    l30:
-    l31:
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l3: // 00011  I-form
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	unsigned funct3 = iform.fields.funct3;
-	if (iform.fields.rd == 0 and iform.fields.rs1 == 0)
-	  {
-	    if (funct3 == 0)
-	      {
-		if (iform.top4() == 0)
-		  {
-		    op0 = iform.pred();
-		    op1 = iform.succ();
-		    return instTable_.getInstInfo(InstId::fence);
-		  }
-	      }
-	    else if (funct3 == 1)
-	      {
-		if (iform.uimmed() == 0)
-		  return instTable_.getInstInfo(InstId::fencei);
-	      }
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l4:  // 00100  I-form
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.immed();
-	unsigned funct3 = iform.fields.funct3;
-
-	if      (funct3 == 0)  return instTable_.getInstInfo(InstId::addi);
-	else if (funct3 == 1)
-	  {
-	    unsigned topBits = 0, shamt = 0;
-	    iform.getShiftFields(isRv64(), topBits, shamt);
-	    if (topBits == 0)
-	      {
-		op2 = shamt;
-		return instTable_.getInstInfo(InstId::slli);
-	      }
-	  }
-	else if (funct3 == 2)  return instTable_.getInstInfo(InstId::slti);
-	else if (funct3 == 3)  return instTable_.getInstInfo(InstId::sltiu);
-	else if (funct3 == 4)  return instTable_.getInstInfo(InstId::xori);
-	else if (funct3 == 5)
-	  {
-	    unsigned topBits = 0, shamt = 0;
-	    iform.getShiftFields(isRv64(), topBits, shamt);
-	    op2 = shamt;
-	    if (topBits == 0)
-	      return instTable_.getInstInfo(InstId::srli);
-	    if (isRv64())
-	      topBits <<= 1;
-	    if (topBits == 0x20)
-	      return instTable_.getInstInfo(InstId::srai);
-	  }
-	else if (funct3 == 6)  return instTable_.getInstInfo(InstId::ori);
-	else if (funct3 == 7)  return instTable_.getInstInfo(InstId::andi);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l5:  // 00101   U-form
-      {
-	UFormInst uform(inst);
-  isUType = true;
-	op0 = uform.bits.rd;
-	op1 = uform.immed();
-	return instTable_.getInstInfo(InstId::auipc);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l6:  // 00110  I-form
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.immed();
-	unsigned funct3 = iform.fields.funct3;
-	if (funct3 == 0)
-	  return instTable_.getInstInfo(InstId::addiw);
-	else if (funct3 == 1)
-	  {
-	    if (iform.top7() == 0)
-	      {
-		op2 = iform.fields2.shamt;
-		return instTable_.getInstInfo(InstId::slliw);
-	      }
-	  }
-	else if (funct3 == 5)
-	  {
-	    op2 = iform.fields2.shamt;
-	    if (iform.top7() == 0)
-	      return instTable_.getInstInfo(InstId::srliw);
-	    else if (iform.top7() == 0x20)
-	      return instTable_.getInstInfo(InstId::sraiw);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l8:  // 01000  S-form
-      {
-	SFormInst sform(inst);
-  isSType = true;
-	op0 = sform.bits.rs1;
-	op1 = sform.bits.rs2;
-	op2 = sform.immed();
-	uint32_t funct3 = sform.bits.funct3;
-
-	if (funct3 == 0) return instTable_.getInstInfo(InstId::sb);
-	if (funct3 == 1) return instTable_.getInstInfo(InstId::sh);
-	if (funct3 == 2) return instTable_.getInstInfo(InstId::sw);
-	if (funct3 == 3 and isRv64()) return instTable_.getInstInfo(InstId::sd);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l11:  // 01011  R-form atomics
-      if (not isRva())
-	return instTable_.getInstInfo(InstId::illegal);
-
-      if (false)  // Not implemented
-      {
-	if (not isRva())
-	  return instTable_.getInstInfo(InstId::illegal);
-	RFormInst rf(inst);
-  isRType = true;
-	uint32_t top5 = rf.top5(), f3 = rf.bits.funct3;
-	op0 = rf.bits.rd; op1 = rf.bits.rs1; op2 = rf.bits.rs2;
-
-	if (f3 == 2)
-	  {
-	    if (top5 == 0)    return instTable_.getInstInfo(InstId::amoadd_w);
-	    if (top5 == 1)    return instTable_.getInstInfo(InstId::amoswap_w);
-	    if (top5 == 2)    return instTable_.getInstInfo(InstId::lr_w);
-	    if (top5 == 3)    return instTable_.getInstInfo(InstId::sc_w);
-	    if (top5 == 4)    return instTable_.getInstInfo(InstId::amoxor_w);
-	    if (top5 == 8)    return instTable_.getInstInfo(InstId::amoor_w);
-	    if (top5 == 0x0c) return instTable_.getInstInfo(InstId::amoand_w);
-	    if (top5 == 0x10) return instTable_.getInstInfo(InstId::amomin_w);
-	    if (top5 == 0x14) return instTable_.getInstInfo(InstId::amomax_w);
-	    if (top5 == 0x18) return instTable_.getInstInfo(InstId::amominu_w);
-	    if (top5 == 0x1c) return instTable_.getInstInfo(InstId::amomaxu_w);
-	  }
-	else if (f3 == 3)
-	  {
-	    if (not isRv64()) return instTable_.getInstInfo(InstId::illegal);
-	    if (top5 == 0)    return instTable_.getInstInfo(InstId::amoadd_d);
-	    if (top5 == 1)    return instTable_.getInstInfo(InstId::amoswap_d);
-	    if (top5 == 2)    return instTable_.getInstInfo(InstId::lr_d);
-	    if (top5 == 3)    return instTable_.getInstInfo(InstId::sc_d);
-	    if (top5 == 4)    return instTable_.getInstInfo(InstId::amoxor_d);
-	    if (top5 == 8)    return instTable_.getInstInfo(InstId::amoor_d);
-	    if (top5 == 0xc)  return instTable_.getInstInfo(InstId::amoand_d);
-	    if (top5 == 0x10) return instTable_.getInstInfo(InstId::amomin_d);
-	    if (top5 == 0x14) return instTable_.getInstInfo(InstId::amomax_d);
-	    if (top5 == 0x18) return instTable_.getInstInfo(InstId::amominu_d);
-	    if (top5 == 0x1c) return instTable_.getInstInfo(InstId::amomaxu_d);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l12:  // 01100  R-form
-      {
-	RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd;
-	op1 = rform.bits.rs1;
-	op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	if (funct7 == 0)
-	  {
-	    if      (funct3 == 0) return instTable_.getInstInfo(InstId::add);
-	    else if (funct3 == 1) return instTable_.getInstInfo(InstId::sll);
-	    else if (funct3 == 2) return instTable_.getInstInfo(InstId::slt);
-	    else if (funct3 == 3) return instTable_.getInstInfo(InstId::sltu);
-	    else if (funct3 == 4) return instTable_.getInstInfo(InstId::xor_);
-	    else if (funct3 == 5) return instTable_.getInstInfo(InstId::srl);
-	    else if (funct3 == 6) return instTable_.getInstInfo(InstId::or_);
-	    else if (funct3 == 7) return instTable_.getInstInfo(InstId::and_);
-	  }
-	else if (funct7 == 1)
-	  {
-	    if      (not isRvm()) return instTable_.getInstInfo(InstId::illegal);
-	    else if (funct3 == 0) return instTable_.getInstInfo(InstId::mul);
-	    else if (funct3 == 1) return instTable_.getInstInfo(InstId::mulh);
-	    else if (funct3 == 2) return instTable_.getInstInfo(InstId::mulhsu);
-	    else if (funct3 == 3) return instTable_.getInstInfo(InstId::mulhu);
-	    else if (funct3 == 4) return instTable_.getInstInfo(InstId::div);
-	    else if (funct3 == 5) return instTable_.getInstInfo(InstId::divu);
-	    else if (funct3 == 6) return instTable_.getInstInfo(InstId::rem);
-	    else if (funct3 == 7) return instTable_.getInstInfo(InstId::remu);
-	  }
-	else if (funct7 == 0x20)
-	  {
-	    if      (funct3 == 0) return instTable_.getInstInfo(InstId::sub);
-	    else if (funct3 == 5) return instTable_.getInstInfo(InstId::sra);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l13:  // 01101  U-form
-      {
-	UFormInst uform(inst);
-  isUType = true;
-	op0 = uform.bits.rd;
-	op1 = uform.immed();
-	return instTable_.getInstInfo(InstId::lui);
-      }
-
-    l14: // 01110  R-Form
-      {
-	const RFormInst rform(inst);
-  isRType = true;
-	op0 = rform.bits.rd;
-	op1 = rform.bits.rs1;
-	op2 = rform.bits.rs2;
-	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
-	if (funct7 == 0)
-	  {
-	    if      (funct3 == 0) return instTable_.getInstInfo(InstId::addw);
-	    else if (funct3 == 1) return instTable_.getInstInfo(InstId::sllw);
-	    else if (funct3 == 5) return instTable_.getInstInfo(InstId::srlw);
-	  }
-	else if (funct7 == 1)
-	  {
-	    if      (funct3 == 0) return instTable_.getInstInfo(InstId::mulw);
-	    else if (funct3 == 4) return instTable_.getInstInfo(InstId::divw);
-	    else if (funct3 == 5) return instTable_.getInstInfo(InstId::divuw);
-	    else if (funct3 == 6) return instTable_.getInstInfo(InstId::remw);
-	    else if (funct3 == 7) return instTable_.getInstInfo(InstId::remuw);
-	  }
-	else if (funct7 == 0x20)
-	  {
-	    if      (funct3 == 0)  return instTable_.getInstInfo(InstId::subw);
-	    else if (funct3 == 5)  return instTable_.getInstInfo(InstId::sraw);
-	  }
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l24: // 11000   B-form
-      {
-	BFormInst bform(inst);
-  isBType = true;
-	op0 = bform.bits.rs1;
-	op1 = bform.bits.rs2;
-	op2 = bform.immed();
-	uint32_t funct3 = bform.bits.funct3;
-	if      (funct3 == 0)  return instTable_.getInstInfo(InstId::beq);
-	else if (funct3 == 1)  return instTable_.getInstInfo(InstId::bne);
-	else if (funct3 == 4)  return instTable_.getInstInfo(InstId::blt);
-	else if (funct3 == 5)  return instTable_.getInstInfo(InstId::bge);
-	else if (funct3 == 6)  return instTable_.getInstInfo(InstId::bltu);
-	else if (funct3 == 7)  return instTable_.getInstInfo(InstId::bgeu);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l25:  // 11001  I-form
-      {
-	IFormInst iform(inst);
-  isIType = true;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.immed();
-	if (iform.fields.funct3 == 0)
-	  return instTable_.getInstInfo(InstId::jalr);
-      }
-      return instTable_.getInstInfo(InstId::illegal);
-
-    l27:  // 11011  J-form
-      {
-	JFormInst jform(inst);
-  isJType = true;
-	op0 = jform.bits.rd;
-	op1 = jform.immed();
-	return instTable_.getInstInfo(InstId::jal);
-      }
-
-    l28:  // 11100  I-form
-      {
-	IFormInst iform(inst);
-  //TODO: Fix this once status register checks
-  // are added.
-  isIType = false;
-	op0 = iform.fields.rd;
-	op1 = iform.fields.rs1;
-	op2 = iform.uimmed(); // csr
-	switch (iform.fields.funct3)
-	  {
-	  case 0:
-	    {
-	      uint32_t funct7 = op2 >> 5;
-	      if (funct7 == 0) // ecall ebreak uret
-		{
-		  if (op1 != 0 or op0 != 0)
-		    return instTable_.getInstInfo(InstId::illegal);
-		  else if (op2 == 0)
-		    return instTable_.getInstInfo(InstId::ecall);
-		  else if (op2 == 1)
-		    return instTable_.getInstInfo(InstId::ebreak);
-		  else if (op2 == 2)
-		    return instTable_.getInstInfo(InstId::uret);
-		}
-	      else if (funct7 == 9)
-		{
-		  if (op0 != 0)
-		    return instTable_.getInstInfo(InstId::illegal);
-		  else // sfence.vma
-		    return instTable_.getInstInfo(InstId::illegal);
-		}
-	      else if (op2 == 0x102)
-		return instTable_.getInstInfo(InstId::sret);
-	      else if (op2 == 0x302)
-		return instTable_.getInstInfo(InstId::mret);
-	      else if (op2 == 0x105)
-		return instTable_.getInstInfo(InstId::wfi);
-	    }
-	    break;
-	  case 1:  return instTable_.getInstInfo(InstId::csrrw);
-	  case 2:  return instTable_.getInstInfo(InstId::csrrs);
-	  case 3:  return instTable_.getInstInfo(InstId::csrrc);
-	  case 5:  return instTable_.getInstInfo(InstId::csrrwi);
-	  case 6:  return instTable_.getInstInfo(InstId::csrrsi);
-	  case 7:  return instTable_.getInstInfo(InstId::csrrci);
-	  default: return instTable_.getInstInfo(InstId::illegal);
-	  }
-	return instTable_.getInstInfo(InstId::illegal);
-      }
-    }
-  else
-    return instTable_.getInstInfo(InstId::illegal);
-}
-
-
-std::string
-roundingModeString(RoundingMode mode)
-{
-  switch (mode)
-    {
-    case RoundingMode::NearestEven: return "rne";
-    case RoundingMode::Zero:        return "rtz";
-    case RoundingMode::Down:        return "rdn";
-    case RoundingMode::Up:          return "rup";
-    case RoundingMode::NearestMax:  return "rmm";
-    case RoundingMode::Invalid1:    return "inv1";
-    case RoundingMode::Invalid2:    return "inv2";
-    case RoundingMode::Dynamic:     return "dyn";
-    default:                        return "inv";
-    }
-  return "inv";
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstRdRs1Rs2(std::ostream& stream, const char* inst,
-			     unsigned rd, unsigned rs1, unsigned rs2)
-{
-  // Print instruction in a 9 character field.
-  stream << std::left << std::setw(9) << inst;
-
-  stream << intRegs_.regName(rd, abiNames_) << ", "
-	 << intRegs_.regName(rs1, abiNames_) << ", "
-	 << intRegs_.regName(rs2, abiNames_);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstLdSt(std::ostream& stream, const char* inst,
-			 unsigned rd, unsigned rs1, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  const char* sign = imm < 0? "-" : "";
-  if (imm < 0)
-    imm = -imm;
-
-  // Keep least sig 12 bits.
-  imm = imm & 0xfff;
-
-  stream << intRegs_.regName(rd, abiNames_) << ", " << sign << "0x"
-	 << std::hex << imm << "(" << intRegs_.regName(rs1, abiNames_) << ")";
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstFpLdSt(std::ostream& stream, const char* inst,
-			   unsigned rd, unsigned rs1, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  const char* sign = imm < 0? "-" : "";
-  if (imm < 0)
-    imm = -imm;
-
-  // Keep least sig 12 bits.
-  imm = imm & 0xfff;
-
-  stream << "f" << rd << ", " << sign << "0x" << std::hex << imm
-	 << "(" << intRegs_.regName(rs1, abiNames_) << ")";
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstShiftImm(std::ostream& stream, const char* inst,
-			     unsigned rs1, unsigned rs2, uint32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  if constexpr (sizeof(URV) == 4)
-    imm = imm & 0x1f;
-  else
-    imm = imm & 0x3f;
-
-  stream << intRegs_.regName(rs1, abiNames_) << ", "
-	 << intRegs_.regName(rs2, abiNames_) << ", 0x"
-	 << std::hex << imm;
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstRegRegImm12(std::ostream& stream, const char* inst,
-				unsigned rs1, unsigned rs2, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << intRegs_.regName(rs1, abiNames_) << ", "
-	 << intRegs_.regName(rs2, abiNames_) << ", ";
-
-  if (imm < 0)
-    stream << "-0x" << std::hex << ((-imm) & 0xfff);
-  else
-    stream << "0x" << std::hex << (imm & 0xfff);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printBranchInst(std::ostream& stream, const char* inst,
-				unsigned rs1, unsigned rs2, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << intRegs_.regName(rs1, abiNames_) << ", "
-	 << intRegs_.regName(rs2, abiNames_) << ", . ";
-
-  char sign = '+';
-  if (imm < 0)
-    {
-      sign = '-';
-      imm = -imm;
-    }
-
-  stream << sign << " 0x" << std::hex << (imm & 0xfff);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printInstRegImm(std::ostream& stream, const char* inst,
-			   unsigned rs1, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << intRegs_.regName(rs1, abiNames_) << ", ";
-
-  if (imm < 0)
-    stream << "-0x" << std::hex << (-imm);
-  else
-    stream << "0x" << std::hex << imm;
-}
-
-
-template <typename URV>
-void
-Core<URV>::printBranchInst(std::ostream& stream, const char* inst,
-			   unsigned rs1, int32_t imm)
-{
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << intRegs_.regName(rs1, abiNames_) << ", . ";
-
-  char sign = '+';
-  if (imm < 0)
-    {
-      sign = '-';
-      imm = -imm;
-    }
-  stream << sign << " 0x" << std::hex << imm;
-}
-
-
-template <typename URV>
-void
-Core<URV>::printFp32f(std::ostream& stream, const char* inst,
-		      unsigned rd, unsigned rs1, unsigned rs2,
-		      unsigned rs3, RoundingMode mode)
-{
-  if (not isRvf())
-    {
-      stream << "illegal";
-      return;
-    }
-
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << "f" << rd << ", f" << rs1 << ", f" << rs2 << ", f" << rs3
-	 << ", " << roundingModeString(mode);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printFp32d(std::ostream& stream, const char* inst,
-		      unsigned rd, unsigned rs1, unsigned rs2,
-		      unsigned rs3, RoundingMode mode)
-{
-  if (not isRvd())
-    {
-      stream << "illegal";
-      return;
-    }
-
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << "f" << rd << ", f" << rs1 << ", f" << rs2 << ", f" << rs3
-	 << ", " << roundingModeString(mode);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printFp32f(std::ostream& stream, const char* inst,
-		      unsigned rd, unsigned rs1, unsigned rs2,
-		      RoundingMode mode)
-{
-  if (not isRvf())
-    {
-      stream << "illegal";
-      return;
-    }
-
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << "f" << rd << ", f" << rs1 << ", f" << rs2
-	   << ", " << roundingModeString(mode);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printFp32d(std::ostream& stream, const char* inst,
-		      unsigned rd, unsigned rs1, unsigned rs2,
-		      RoundingMode mode)
-{
-  if (not isRvd())
-    {
-      stream << "illegal";
-      return;
-    }
-
-  // Print instruction in a 8 character field.
-  stream << std::left << std::setw(8) << inst << ' ';
-
-  stream << "f" << rd << ", f" << rs1 << ", f" << rs2
-	   << ", " << roundingModeString(mode);
-}
-
-
-template <typename URV>
-void
-Core<URV>::disassembleFp(uint32_t inst, std::ostream& os)
-{
-  if (not isRvf())
-    {
-      os << "illegal";
-      return;
-    }
-
-  RFormInst rform(inst);
-  unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-  unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-  RoundingMode mode = RoundingMode(f3);
-  std::string rms = roundingModeString(mode);
-
-  if (f7 & 1)
-    {
-      if (not isRvd())
-	{
-	  os << "illegal";
-	  return;
-	}
-
-      if (f7 == 1)        printFp32d(os, "fadd.d", rd, rs1, rs2, mode);
-      else if (f7 == 5)   printFp32d(os, "fsub.d", rd, rs1, rs2, mode);
-      else if (f7 == 9)   printFp32d(os, "fmul.d", rd, rs1, rs2, mode);
-      else if (f7 == 0xd) printFp32d(os, "fdiv.d", rd, rs1, rs2, mode);
-      else if (f7 == 0x11)
-	{
-	  if      (f3 == 0) os << "fsgnj.d  f" << rd << ", f" << rs1;
-	  else if (f3 == 1) os << "fsgnjn.d f" << rd << ", f" << rs1;
-	  else if (f3 == 2) os << "fsgnjx.d f" << rd << ", f" << rs1;
-	  else              os << "illegal";
-	}
-      else if (f7 == 0x15)
-	{
-	  if      (f3==0) os<< "fmin.d   f" << rd << ", f" << rs1 << ", f" << rs2;
-	  else if (f3==1) os<< "fmax.d   f" << rd << ", f" << rs1 << ", f" << rs2;
-	  else            os<< "illegal";
-	}
-      else if (f7 == 0x21 and rs2 == 0)
-	os << "fcvt.d.s f" << rd << ", f" << rs1 << ", " << rms;
-      else if (f7 == 0x2d)
-	os << "fsqrt.d  f" << rd << ", f" << rs1 << ", " << rms;
-      else if (f7 == 0x51)
-	{
-	  std::string rdn = intRegs_.regName(rd, abiNames_);
-	  if      (f3==0)  os<< "fle.d    " << rdn << ", f" << rs1 << ", f" << rs2;
-	  else if (f3==1)  os<< "flt.d    " << rdn << ", f" << rs1 << ", f" << rs2;
-	  else if (f3==2)  os<< "feq.d    " << rdn << ", f" << rs1 << ", f" << rs2;
-	  else             os<< "illegal";
-	}
-      else if (f7 == 0x61)
-	{
-	  std::string rdn = intRegs_.regName(rd, abiNames_);
-	  if (rs2==0)
-	    os << "fcvt.w.d "  << rdn << ", f" << rs1 << ", " << rms;
-	  else if (rs2==1)
-	    os << "fcvt.wu.d " << rdn << ", f" << rs1 << ", " << rms;
-	  else
-	    os << "illegal";
-	}
-      else if (f7 == 0x69)
-	{
-	  std::string rs1n = intRegs_.regName(rs1, abiNames_);
-	  if (rs2==0)
-	    os << "fcvt.d.w f"  << rd << ", " << rs1n << ", " << rms;
-	  else if (rs2==1)
-	    os << "fcvt.d.wu f" << rd << ", " << rs1n << ", " << rms;
-	  else
-	    os << "illegal";
-	}
-      else if (f7 == 0x71)
-	{
-	  std::string rdn = intRegs_.regName(rd, abiNames_);
-	  if (rs2==0 and f3==0)  os << "fmv.x.d " << rdn << ", f" << rs1;
-	  if (rs2==0 and f3==1)  os << "fclass.d " << rdn << ", f" << rs1;
-	  else                   os << "illegal";
-	}
-      else if (f7 == 0x79)
-	{
-	  std::string rs1n = intRegs_.regName(rs1, abiNames_);
-	  if (rs2 == 0 and f3 == 0)  os << "fmv.d.x  f" << rd << ", " << rs1n;
-	  else                       os << "illegal";
-	}
-      else
-	os << "illegal";
-      return;
-    }
-
-  if (f7 == 0)          printFp32f(os, "fadd.s", rd, rs1, rs2, mode);
-  else if (f7 == 4)     printFp32f(os, "fsub.s", rd, rs1, rs2, mode);
-  else if (f7 == 8)     printFp32f(os, "fmul.s", rd, rs1, rs2, mode);
-  else if (f7 == 0xc)   printFp32f(os, "div.s", rd, rs1, rs2, mode);
-  else if (f7 == 0x10)
-    {
-      if      (f3 == 0) os << "fsgnj.s  f" << rd << ", f" << rs1;
-      else if (f3 == 1) os << "fsgnjn.s f" << rd << ", f" << rs1;
-      else if (f3 == 2) os << "fsgnjx.s f" << rd << ", f" << rs1;
-      else              os << "illegal";
-    }
-  else if (f7 == 0x14)
-    {
-      if      (f3 == 0) os << "fmin.s  f" << rd << ", f" << rs1 << ", f" << rs2;
-      else if (f3 == 1)	os << "fmax.s  f" << rd << ", f" << rs1 << ", f" << rs2;
-      else              os << "illegal";
-    }
- 
-  else if (f7 == 0x20 and rs2 == 1)
-    os << "fcvt.s.d f" << rd << ", f" << rs1 << ", " << rms;
-  else if (f7 == 0x2c)
-    os << "fsqrt.s  f" << rd << ", f" << rs1 << ", " << rms;
-  else if (f7 == 0x50)
-    {
-      std::string rdn = intRegs_.regName(rd, abiNames_);
-      if      (f3 == 0) os << "fle.s    " << rdn << ", f" << rs1 << ", f" << rs2;
-      else if (f3 == 1) os << "flt.s    " << rdn << ", f" << rs1 << ", f" << rs2;
-      else if (f3 == 2) os << "feq.s    " << rdn << ", f" << rs1 << ", f" << rs2;
-      else              os << "illegal";
-    }
-  else if (f7 == 0x60)
-    {
-      std::string rdn = intRegs_.regName(rd, abiNames_);
-      if      (rs2==0) os << "fcvt.w.s "  << rdn << ", f" << rs1 << ", " << rms;
-      else if (rs2==1) os << "fcvt.wu.s " << rdn << ", f" << rs1 << ", " << rms;
-      else if (rs2==2) os << "fcvt.l.s "  << rdn << ", f" << rs1 << ", " << rms;
-      else if (rs2==3) os << "fcvt.lu.s " << rdn << ", f" << rs1 << ", " << rms;
-      else             os << "illegal";
-    }
-  else if (f7 == 0x68)
-    {
-      std::string rs1n = intRegs_.regName(rs1, abiNames_);
-
-      if      (rs2==0) os << "fcvt.s.w f"  << rd << ", " << rs1n << ", " << rms;
-      else if (rs2==1) os << "fcvt.s.wu f" << rd << ", " << rs1n << ", " << rms;
-      else if (rs2==2) os << "fcvt.s.l f"  << rd << ", " << rs1n << ", " << rms;
-      else if (rs2==3) os << "fcvt.s.lu f" << rd << ", " << rs1n << ", " << rms;
-      else             os << "illegal";
-    }
-  else if (f7 == 0x70)
-    {
-      std::string rdn = intRegs_.regName(rd, abiNames_);
-      if      (rs2 == 0 and f3 == 0)  os << "fmv.x.w  " << rdn << ", f" << rs1;
-      else if (rs2 == 0 and f3 == 1)  os << "fclass.s " << rdn << ", f" << rs1;
-      else                            os << "illegal";
-    }
-  else if (f7 == 0x74)
-    {
-      std::string rs1n = intRegs_.regName(rs1, abiNames_);
-      if (rs2 == 0 and f3 == 0)  os << "fmv.w.x  f" << rd << ", " << rs1n;
-      else                       os << "illegal";
-    }
-  else
-    os << "illegal";
-}
-
-
-template <typename URV>
-void
-Core<URV>::printAmoInst(std::ostream& stream, const char* inst, bool aq,
-			bool rl, unsigned rd, unsigned rs1, unsigned rs2)
-{
-  stream << inst;
-
-  if (aq)
-    stream << ".aq";
-
-  if (rl)
-    stream << ".rl";
-
-  stream << ' ';
-  stream << intRegs_.regName(rd,  abiNames_) << ", "
-	 << intRegs_.regName(rs1, abiNames_) << ", "
-    	 << intRegs_.regName(rs2, abiNames_);
-}
-
-
-template <typename URV>
-void
-Core<URV>::printLrInst(std::ostream& stream, const char* inst, bool aq,
-		       bool rl, unsigned rd, unsigned rs1)
-{
-  stream << inst;
-
-  if (aq)
-    stream << ".aq";
-
-  if (rl)
-    stream << ".rl";
-
-  stream << ' ';
-  stream << intRegs_.regName(rd, abiNames_)
-	 << ", (" << intRegs_.regName(rs1, abiNames_) << ")";
-}
-
-
-template <typename URV>
-void
-Core<URV>::printScInst(std::ostream& stream, const char* inst, bool aq,
-		       bool rl, unsigned rd, unsigned rs1, unsigned rs2)
-{
-  stream << inst;
-
-  if (aq)
-    stream << ".aq";
-
-  if (rl)
-    stream << ".rl";
-
-  stream << ' ';
-
-  stream << intRegs_.regName(rd, abiNames_)
-	 << ", " << intRegs_.regName(rs2, abiNames_)
-	 << ", (" << intRegs_.regName(rs1) << ")";
-}
-
-
-template <typename URV>
-void
-Core<URV>::disassembleInst32(uint32_t inst, std::ostream& stream)
-{
-  if (not isFullSizeInst(inst))
-    {
-      stream << "illegal";  // Not a compressed instruction.
-      return;
-    }
-
-  unsigned opcode = (inst & 0x7f) >> 2;  // Upper 5 bits of opcode.
-
-  switch (opcode)
-    {
-    case 0:  // 00000   I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	int32_t imm = iform.immed();
-	switch (iform.fields.funct3)
-	  {
-	  case 0:  printInstLdSt(stream, "lb",  rd, rs1, imm); break;
-	  case 1:  printInstLdSt(stream, "lh",  rd, rs1, imm); break;
-	  case 2:  printInstLdSt(stream, "lw",  rd, rs1, imm); break;
-	  case 3:  printInstLdSt(stream, "ld",  rd, rs1, imm); break;
-	  case 4:  printInstLdSt(stream, "lbu", rd, rs1, imm); break;
-	  case 5:  printInstLdSt(stream, "lhu", rd, rs1, imm); break;
-	  case 6:  printInstLdSt(stream, "lwu", rd, rs1, imm); break;
-	  default: stream << "illegal";                        break;
-	  }
-      }
-      break;
-
-    case 1:   // 0001 I-Form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	int32_t imm = iform.immed();
-	uint32_t f3 = iform.fields.funct3;
-	if (f3 == 2)
-	  {
-	    if (isRvf())
-	      printInstFpLdSt(stream, "flw", rd, rs1, imm);
-	    else
-	      stream << "illegal";
-	  }
-	else if (f3 == 3)
-	  {
-	    if (isRvd())
-	      printInstFpLdSt(stream, "fld", rd, rs1, imm);
-	    else
-	      stream << "illegal";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-  case 2: {  // 00010  R-form
-	  RFormInst rform(inst);
-	  unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	  unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	  if (f7 == 0)
-	    {
-	      if      (f3 == 4)  printInstRdRs1Rs2(stream, "getq",  rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else if (f7 == 1)
-	    {
-	      if (f3 == 2)       printInstRdRs1Rs2(stream, "setq",    rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else if (f7 == 2)
-	    {
-	      if (f3 == 0)       printInstRdRs1Rs2(stream, "retirq",    rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else if (f7 == 3)
-	    {
-	      if (f3 == 6)       printInstRdRs1Rs2(stream, "maskirq",    rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else if (f7 == 4)
-	    {
-	      if (f3 == 4)       printInstRdRs1Rs2(stream, "waitirq",    rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else if (f7 == 5)
-	    {
-	      if (f3 == 6)       printInstRdRs1Rs2(stream, "timer",    rd, rs1, rs2);
-	      else               stream << "illegal";
-	    }
-	  else
-	    stream << "illegal";
-  }
-  break;
-
-    case 3:  // 00011  I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	unsigned funct3 = iform.fields.funct3;
-	if (rd != 0 or rs1 != 0)
-	  stream << "illegal";
-	else if (funct3 == 0)
-	  {
-	    if (iform.top4() != 0)
-	      stream << "illegal";
-	    else
-	      stream << "fence  " << iform.pred() << ", " << iform.succ();
-	  }
-	else if (funct3 == 1)
-	  {
-	    if (iform.uimmed() != 0)
-	      stream << "illegal";
-	    else
-	      stream << "fence.i ";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 4:  // 00100  I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	int32_t imm = iform.immed();
-	switch (iform.fields.funct3)
-	  {
-	  case 0:
-	    printInstRegRegImm12(stream, "addi", rd, rs1, imm);
-	    break;
-	  case 1:
-	    {
-	      unsigned topBits = 0, shamt = 0;
-	      iform.getShiftFields(isRv64(), topBits, shamt);
-	      if (topBits == 0)
-		printInstShiftImm(stream, "slli", rd, rs1, shamt);
-	      else
-		stream << "illegal";
-	    }
-	    break;
-	  case 2:
-	    printInstRegRegImm12(stream, "slti", rd, rs1, imm);
-	    break;
-	  case 3:
-	    printInstRegRegImm12(stream, "sltiu", rd, rs1, imm);
-	    break;
-	  case 4:
-	    printInstRegRegImm12(stream, "xori", rd, rs1, imm);
-	    break;
-	  case 5:
-	    {
-	      unsigned topBits = 0, shamt = 0;
-	      iform.getShiftFields(isRv64(), topBits, shamt);
-	      if (topBits == 0)
-		printInstShiftImm(stream, "srli", rd, rs1, shamt);
-	      else
-		{
-		  if (isRv64())
-		    topBits <<= 1;
-		  if (topBits == 0x20)
-		    printInstShiftImm(stream, "srai", rd, rs1, shamt);
-		  else
-		    stream << "illegal";
-		}
-	    }
-	    break;
-	  case 6:
-	    printInstRegRegImm12(stream, "ori", rd, rs1, imm);
-	    break;
-	  case 7:
-	    printInstRegRegImm12(stream, "andi", rd, rs1, imm);
-	    break;
-	  default:
-	    stream << "illegal";
-	    break;
-	  }
-      }
-      break;
-
-    case 5:  // 00101   U-form
-      {
-	UFormInst uform(inst);
-	stream << "auipc    " << intRegs_.regName(uform.bits.rd, abiNames_)
-	       << ", 0x" << std::hex << ((uform.immed() >> 12) & 0xfffff);
-      }
-      break;
-
-    case 6:  // 00110  I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	int32_t imm = iform.immed();
-	unsigned funct3 = iform.fields.funct3;
-	if (funct3 == 0)
-	  {
-	    if (isRv64())
-	      printInstRegRegImm12(stream, "addi", rd, rs1, imm);
-	    else
-	      stream << "illegal";
-	  }
-	else if (funct3 == 1)
-	  {
-	    if (iform.top7() != 0)
-	      stream << "illegal";
-	    else if (isRv64())
-	      printInstShiftImm(stream, "slliw", rd, rs1, iform.fields2.shamt);
-	    else
-	      stream << "illegal";
-	  }
-	else if (funct3 == 5)
-	  {
-	    if (iform.top7() == 0)
-	      printInstShiftImm(stream, "srliw", rd, rs1, iform.fields2.shamt);
-	    else if (iform.top7() == 0x20)
-	      printInstShiftImm(stream, "sraiw", rd, rs1, iform.fields2.shamt);
-	    else
-	      stream << "illegal";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 8:  // 01000  S-form
-      {
-	SFormInst sform(inst);
-	unsigned rs1 = sform.bits.rs1, rs2 = sform.bits.rs2;
-	int32_t imm = sform.immed();
-	switch (sform.bits.funct3)
-	  {
-	  case 0:  printInstLdSt(stream, "sb", rs2, rs1, imm); break;
-	  case 1:  printInstLdSt(stream, "sh", rs2, rs1, imm); break;
-	  case 2:  printInstLdSt(stream, "sw", rs2, rs1, imm); break;
-	  default:
-	    if (not isRv64())
-	      stream << "illegal";
-	    else
-	      printInstLdSt(stream, "sd", rs2, rs1, imm);
-	    break;
-	  }
-      }
-      break;
-
-    case 9:   // 01001  S-form
-      {
-	SFormInst sf(inst);
-	unsigned rs1 = sf.bits.rs1, rs2 = sf.bits.rs2, f3 = sf.bits.funct3;
-	int32_t imm = sf.immed();
-	if (f3 == 2)
-	  {
-	    if (isRvf())
-	      printInstFpLdSt(stream, "fsw", rs2, rs1, imm);
-	    else
-	      stream << "illegal";
-	  }
-	else if (f3 == 3)
-	  {
-	    if (isRvd())
-	      printInstFpLdSt(stream, "fsd", rs2, rs1, imm);
-	    else
-	      stream << "illegal";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 11:  // 01011  R-form  atomics
-      {
-	if (not isRva())
-	  {
-	    stream << "illegal";
-	    break;
-	  }
-
-	RFormInst rf(inst);
-	uint32_t top5 = rf.top5(), f3 = rf.bits.funct3;
-	uint32_t rd = rf.bits.rd, rs1 = rf.bits.rs1, rs2 = rf.bits.rs2;
-	bool rl = rf.rl(), aq = rf.aq();
-	if (f3 == 2)
-	  {
-	    if (top5 == 0)
-	      printAmoInst(stream, "amoadd.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 1)
-	      printAmoInst(stream, "amoswap.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 2)
-	      printLrInst(stream, "lr.w", aq, rl, rd, rs1);
-	    else if (top5 == 3)
-	      printScInst(stream, "sc.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 4)
-	      printAmoInst(stream, "amoxor.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 8)
-	      printAmoInst(stream, "amoor.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x0c)
-	      printAmoInst(stream, "amoand.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x10)
-	      printAmoInst(stream, "amomin.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x14)
-	      printAmoInst(stream, "amomax.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x18)
-	      printAmoInst(stream, "amominu.w", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x1c)
-	      printAmoInst(stream, "amomaxu.w", aq, rl, rd, rs1, rs2);
-	    else
-	      stream << "illegal";
-	  }
-	else if (f3 == 3)
-	  {
-	    if (top5 == 0)
-	      printAmoInst(stream, "amoadd.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 1)
-	      printAmoInst(stream, "amoswap.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 2)
-	      printLrInst(stream, "lr.d", aq, rl, rd, rs1);
-	    else if (top5 == 3)
-	      printScInst(stream, "sc.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 4)
-	      printAmoInst(stream, "amoxor.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 8)
-	      printAmoInst(stream, "amoor.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x0c)
-	      printAmoInst(stream, "amoand.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x10)
-	      printAmoInst(stream, "amomin.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x14)
-	      printAmoInst(stream, "amomax.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x18)
-	      printAmoInst(stream, "amominu.d", aq, rl, rd, rs1, rs2);
-	    else if (top5 == 0x1c)
-	      printAmoInst(stream, "amomaxu.d", aq, rl, rd, rs1, rs2);
-	    else
-	      stream << "illegal";
-	  }
-	else stream << "illegal";
-      }
-      break;
-
-    case 12:  // 01100  R-form
-      {
-	RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	if (f7 == 0)
-	  {
-	    if      (f3 == 0)  printInstRdRs1Rs2(stream, "add",  rd, rs1, rs2);
-	    else if (f3 == 1)  printInstRdRs1Rs2(stream, "sll",  rd, rs1, rs2);
-	    else if (f3 == 2)  printInstRdRs1Rs2(stream, "slt",  rd, rs1, rs2);
-	    else if (f3 == 3)  printInstRdRs1Rs2(stream, "sltu", rd, rs1, rs2);
-	    else if (f3 == 4)  printInstRdRs1Rs2(stream, "xor",  rd, rs1, rs2);
-	    else if (f3 == 5)  printInstRdRs1Rs2(stream, "srl",  rd, rs1, rs2);
-	    else if (f3 == 6)  printInstRdRs1Rs2(stream, "or",   rd, rs1, rs2);
-	    else if (f3 == 7)  printInstRdRs1Rs2(stream, "and",  rd, rs1, rs2);
-	  }
-	else if (f7 == 1)
-	  {
-	    if      (not isRvm())  stream << "illegal";
-	    else if (f3 == 0) printInstRdRs1Rs2(stream, "mul",    rd, rs1, rs2);
-	    else if (f3 == 1) printInstRdRs1Rs2(stream, "mulh",   rd, rs1, rs2);
-	    else if (f3 == 2) printInstRdRs1Rs2(stream, "mulhsu", rd, rs1, rs2);
-	    else if (f3 == 3) printInstRdRs1Rs2(stream, "mulhu",  rd, rs1, rs2);
-	    else if (f3 == 4) printInstRdRs1Rs2(stream, "div",    rd, rs1, rs2);
-	    else if (f3 == 5) printInstRdRs1Rs2(stream, "divu",   rd, rs1, rs2);
-	    else if (f3 == 6) printInstRdRs1Rs2(stream, "rem",    rd, rs1, rs2);
-	    else if (f3 == 7) printInstRdRs1Rs2(stream, "remu",   rd, rs1, rs2);
-	  }
-	else if (f7 == 0x20)
-	  {
-	    if      (f3 == 0)  printInstRdRs1Rs2(stream, "sub", rd, rs1, rs2);
-	    else if (f3 == 5)  printInstRdRs1Rs2(stream, "sra", rd, rs1, rs2);
-	    else               stream << "illegal";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 13:  // 01101  U-form
-      {
-	UFormInst uform(inst);
-	uint32_t imm = uform.immed();
-	stream << "lui      x" << uform.bits.rd << ", ";
-	if (imm < 0) { stream << "-"; imm = -imm; }
-	stream << "0x" << std::hex << ((imm >> 12) & 0xfffff);
-      }
-      break;
-
-    case 14:  // 01110  R-Form
-      {
-	const RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	if (f7 == 0)
-	  {
-	    if      (f3 == 0)  printInstRdRs1Rs2(stream, "addw", rd, rs1, rs2);
-	    else if (f3 == 1)  printInstRdRs1Rs2(stream, "sllw", rd, rs1, rs2);
-	    else if (f3 == 5)  printInstRdRs1Rs2(stream, "srlw", rd, rs1, rs2);
-	    else               stream << "illegal";
-	  }
-	else if (f7 == 1)
-	  {
-	    if      (f3 == 0)  printInstRdRs1Rs2(stream, "mulw",  rd, rs1, rs2);
-	    else if (f3 == 4)  printInstRdRs1Rs2(stream, "divw",  rd, rs1, rs2);
-	    else if (f3 == 5)  printInstRdRs1Rs2(stream, "divuw", rd, rs1, rs2);
-	    else if (f3 == 6)  printInstRdRs1Rs2(stream, "remw",  rd, rs1, rs2);
-	    else if (f3 == 7)  printInstRdRs1Rs2(stream, "remuw", rd, rs1, rs2);
-	    else               stream << "illegal";
-	  }
-	else if (f7 == 0x20)
-	  {
-	    if      (f3 == 0)  printInstRdRs1Rs2(stream, "subw", rd, rs1, rs2);
-	    else if (f3 == 5)  printInstRdRs1Rs2(stream, "sraw", rd, rs1, rs2);
-	    else               stream << "illegal";
-	  }
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 16:  // 10000   rform
-      {
-	RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	unsigned rs3 = f7 >> 2;
-	RoundingMode mode = RoundingMode(f3);
-	if ((f7 & 3) == 0)
-	  printFp32f(stream, "fmadd_s", rd, rs1, rs2, rs3, mode);
-	else if ((f7 & 3) == 1)
-	  printFp32d(stream, "fmadd_d", rd, rs1, rs2, rs3, mode);
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 17:  // 10001   rform
-      {
-	RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	unsigned rs3 = f7 >> 2;
-	RoundingMode mode = RoundingMode(f3);
-	if ((f7 & 3) == 0)
-	  printFp32f(stream, "fmsub_s", rd, rs1, rs2, rs3, mode);
-	else if ((f7 & 3) == 1)
-	  printFp32d(stream, "fmsub_d", rd, rs1, rs2, rs3, mode);
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 18:  // 10010   rform
-      {
-	RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	unsigned rs3 = f7 >> 2;
-	RoundingMode mode = RoundingMode(f3);
-	if ((f7 & 3) == 0)
-	  printFp32f(stream, "fnmsub_s", rd, rs1, rs2, rs3, mode);
-	else if ((f7 & 3) == 1)
-	  printFp32d(stream, "fnmsub_d", rd, rs1, rs2, rs3, mode);
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 19:  // 10011   rform
-      {
-	RFormInst rform(inst);
-	unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
-	unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
-	unsigned rs3 = f7 >> 2;
-	RoundingMode mode = RoundingMode(f3);
-	if ((f7 & 3) == 0)
-	  printFp32f(stream, "fnmadd_s", rd, rs1, rs2, rs3, mode);
-	else if ((f7 & 3) == 1)
-	  printFp32d(stream, "fnmadd_d", rd, rs1, rs2, rs3, mode);
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 20:  // 10100   rform
-      disassembleFp(inst, stream);
-      break;
-
-    case 24:  // 11000   B-form
-      {
-	BFormInst bform(inst);
-	unsigned rs1 = bform.bits.rs1, rs2 = bform.bits.rs2;
-	int32_t imm = bform.immed();
-	switch (bform.bits.funct3)
-	  {
-	  case 0:  printBranchInst(stream, "beq",  rs1, rs2, imm); break;
-	  case 1:  printBranchInst(stream, "bne",  rs1, rs2, imm); break;
-	  case 4:  printBranchInst(stream, "blt",  rs1, rs2, imm); break;
-	  case 5:  printBranchInst(stream, "bge",  rs1, rs2, imm); break;
-	  case 6:  printBranchInst(stream, "bltu", rs1, rs2, imm); break;
-	  case 7:  printBranchInst(stream, "bgeu", rs1, rs2, imm); break;
-	  default: stream << "illegal";                            break;
-	  }
-      }
-      break;
-
-    case 25:  // 11001  I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	if (iform.fields.funct3 == 0)
-	  printInstLdSt(stream, "jalr", rd, rs1, iform.immed());
-	else
-	  stream << "illegal";
-      }
-      break;
-
-    case 27:  // 11011  J-form
-      {
-	JFormInst jform(inst);
-	int32_t imm = jform.immed();
-	stream << "jal      " << intRegs_.regName(jform.bits.rd, abiNames_)
-	       << ", . ";
-	char sign = '+';
-	if (imm < 0)
-	  {
-	    sign = '-';
-	    imm = -imm;
-	  }
-	stream << sign << " 0x" << std::hex << (imm & 0xfffff);
-      }
-      break;
-
-    case 28:  // 11100  I-form
-      {
-	IFormInst iform(inst);
-	unsigned rd = iform.fields.rd, rs1 = iform.fields.rs1;
-	unsigned csrNum = iform.uimmed();
-	std::string rdn = intRegs_.regName(rd, abiNames_);   // rd name
-	std::string rs1n = intRegs_.regName(rs1, abiNames_); // rs1 name
-	std::string csrn;  // csr name
-	auto csr = csRegs_.findCsr(CsrNumber(csrNum));
-	if (csr)
-	  csrn = csr->getName();
-	else
-	  csrn = "illegal";
-	switch (iform.fields.funct3)
-	  {
-	  case 0:
-	    {
-	      uint32_t func7 = iform.top7();
-	      if (func7 == 0)
-		{
-		  if (rs1 != 0 or rd != 0)  stream << "illegal";
-		  else if (csrNum == 0)     stream << "ecall";
-		  else if (csrNum == 1)     stream << "ebreak";
-		  else if (csrNum == 2)     stream << "uret";
-		  else                      stream << "illegal";
-		}
-	      else if (func7 == 9)
-		{
-		  uint32_t rs2 = iform.rs2();
-		  if (rd != 0) stream << "illegal";
-		  else         stream << "SFENCE.VMA " << rs1 << ", " << rs2;
-		}
-	      else if (csrNum == 0x102) stream << "sret";
-	      else if (csrNum == 0x302) stream << "mret";
-	      else if (csrNum == 0x105) stream << "wfi";
-	      else                      stream << "illegal";
-	    }
-	    break;
-	  case 1:
-	    stream << "csrrw    " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  case 2:
-	    stream << "csrrs    " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  case 3:
-	    stream << "csrrc    " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  case 5:
-	    stream << "csrrwi   " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  case 6:
-	    stream << "csrrsi   " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  case 7:
-	    stream << "csrrci   " << rdn << ", " << csrn << ", " << rs1n;
-	    break;
-	  default:
-	    stream << "illegal";
-	    break;
-	  }
-      }
-      break;
-
-    default:
-      stream << "illegal";
-      break;
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::disassembleInst16(uint16_t inst, std::ostream& stream)
-{
-  if (not isRvc())
-    {
-      stream << "illegal";
-      return;
-    }
-
-  uint16_t quadrant = inst & 0x3;
-  uint16_t funct3 =  uint16_t(inst >> 13);    // Bits 15 14 and 13
-
-  switch (quadrant)
-    {
-    case 0:    // quadrant 0
-      switch (funct3)
-	{
-	case 0:   // illegal, c.addi4spn
-	  {
-	    if (inst == 0)
-	      stream << "illegal";
-	    else
-	      {
-		CiwFormInst ciwf(inst);
-		unsigned immed = ciwf.immed();
-		if (immed == 0)
-		  stream << "illegal";
-		else
-		  printInstRegImm(stream, "c.addi4spn", 8+ciwf.bits.rdp,
-				  immed >> 2);
-	      }
-	  }
-	  break;
-	case 1: // c_fld, c_lq
-	  stream << "illegal";
-	  break;
-	case 2: // c.lw
-	  {
-	    ClFormInst clf(inst);
-	    unsigned rd = 8+clf.bits.rdp, rs1 = (8+clf.bits.rs1p);
-	    printInstLdSt(stream, "c.lw", rd, rs1, clf.lwImmed());
-	  }
-	  break;
-	case 3:  // c.flw, c.ld
-	  {
-	    ClFormInst clf(inst);
-	    unsigned rd = 8+clf.bits.rdp, rs1 = (8+clf.bits.rs1p);
-	    if (isRv64())
-	      printInstLdSt(stream, "c.ld", rd, rs1, clf.ldImmed());
-	    else
-	      {
-		if (isRvf())
-		  printInstFpLdSt(stream, "c.flw", rd, rs1, clf.lwImmed());
-		else
-		  stream << "illegal";
-	      }
-	  }
-	  break;
-	case 4:  // reserved
-	  stream << "illegal";
-	  break;
-	case 5:  // c.fsd, c.sq
-	  if (isRvd())
-	    {
-	      ClFormInst clf(inst);
-	      unsigned rd = 8+clf.bits.rdp, rs1 = (8+clf.bits.rs1p);
-	      printInstFpLdSt(stream, "c.fsd", rd, rs1, clf.ldImmed());
-	    }
-	  else
-	    stream << "illegal";
-	  break;
-	case 6:  // c.sw
-	  {
-	    CsFormInst cs(inst);
-	    unsigned rd = (8+cs.bits.rs2p), rs1 = 8+cs.bits.rs1p;
-	    printInstLdSt(stream, "c.sw", rd, rs1, cs.swImmed());
-	  }
-	  break;
-	case 7:  // c.fsw, c.sd
-	  {
-	    CsFormInst cs(inst);
-	    unsigned rd = (8+cs.bits.rs2p), rs1 = (8+cs.bits.rs1p);
-	    if (isRv64())
-	      printInstLdSt(stream, "c.sd", rd, rs1, cs.sdImmed());
-	    else
-	      {
-		if (isRvf())
-		  printInstFpLdSt(stream, "c.fsw", rd, rs1, cs.swImmed());
-		else
-		  stream << "illegal"; // c.fsw
-	      }
-	  }
-	  break;
-	}
-      break;
-
-    case 1:    // quadrant 1
-      switch (funct3)
-	{
-	case 0:  // c.nop, c.addi
-	  {
-	    CiFormInst cif(inst);
-	    if (cif.bits.rd == 0)
-	      stream << "c.nop";
-	    else
-	      printInstRegImm(stream, "c.addi", cif.bits.rd, cif.addiImmed());
-	  }
-	  break;
-
-	case 1:  // c.jal, in rv64 and rv128 this is c.addiw
-	  if (isRv64())
-	    {
-	      CiFormInst cif(inst);
-	      if (cif.bits.rd == 0)
-		stream << "illegal";
-	      else
-		printInstRegImm(stream, "c.addiw", cif.bits.rd, cif.addiImmed());
-	    }
-	  else
-	    {
-	      CjFormInst cjf(inst);
-	      int32_t imm = cjf.immed();
-	      stream << "c.jal    . ";
-	      char sign = '+';
-	      if (imm < 0) { sign = '-'; imm = -imm; }
-	      stream << sign << " 0x" << std::hex << imm;
-	    }
-	  break;
-
-	case 2:  // c.li
-	  {
-	    CiFormInst cif(inst);
-	    printInstRegImm(stream, "c.li", cif.bits.rd, cif.addiImmed());
-	  }
-	  break;
-
-	case 3:  // c.addi16sp, c.lui
-	  {
-	    CiFormInst cif(inst);
-	    int immed16 = cif.addi16spImmed();
-	    if (immed16 == 0)
-	      stream << "illegal";
-	    else if (cif.bits.rd == RegSp)
-	      {
-		stream << "c.addi16sp ";
-		if (immed16 < 0) { stream << "-"; immed16 = -immed16; }
-		stream << "0x" << std::hex << (immed16 >> 4);
-	      }
-	    else
-	      printInstRegImm(stream, "c.lui", cif.bits.rd, cif.luiImmed()>>12);
-	  }
-	  break;
-
-	// c.srli c.srli64 c.srai c.srai64 c.andi c.sub c.xor c.and
-	// c.subw c.addw
-	case 4:
-	  {
-	    CaiFormInst caf(inst);  // compressed and immediate form
-	    unsigned rd = 8 + caf.bits.rdp;
-	    std::string rdName = intRegs_.regName(rd, abiNames_);
-	    int immed = caf.andiImmed();
-	    switch (caf.bits.funct2)
-	      {
-	      case 0:
-		if (caf.bits.ic5 != 0 and not isRv64())
-		  stream << "illegal";
-		else
-		  printInstRegImm(stream, "c.srli", rd, caf.shiftImmed());
-		break;
-	      case 1:
-		if (caf.bits.ic5 != 0 and not isRv64())
-		  stream << "illegal";
-		else
-		  printInstRegImm(stream, "c.srai", rd, caf.shiftImmed());
-		break;
-	      case 2:
-		printInstRegImm(stream, "c.andi", rd, immed);
-		break;
-	      case 3:
-		{
-		  unsigned rs2 = 8+(immed & 0x7); // Lowest 3 bits of immed
-		  std::string rs2n = intRegs_.regName(rs2, abiNames_);
-		  if ((immed & 0x20) == 0)  // Bit 5 of immed
-		    {
-		      switch ((immed >> 3) & 3) // Bits 3 and 4 of immed
-			{
-			case 0:
-			  stream << "c.sub    " << rdName << ", " << rs2n; break;
-			case 1:
-			  stream << "c.xor    " << rdName << ", " << rs2n; break;
-			case 2:
-			  stream << "c.or     " << rdName << ", " << rs2n; break;
-			case 3:
-			  stream << "c.and    " << rdName << ", " << rs2n; break;
-			}
-		    }
-		  else
-		    {
-		      if (not isRv64())
-			stream << "illegal";
-		      else
-			switch ((immed >> 3) & 3)
-			  {
-			  case 0: stream << "c.subw " << rdName << ", " << rs2n;
-			    break;
-			  case 1: stream << "c.addw " << rdName << ", " << rs2n;
-			    break;
-			  case 3: stream << "illegal";
-			    break; // reserved
-			  case 4: stream << "illegal";
-			    break; // reserved
-			}
-		    }
-		}
-		break;
-	      }
-	  }
-	  break;
-
-	case 5:  // c.j
-	  {
-	    CjFormInst cjf(inst);
-	    int32_t imm = cjf.immed();
-	    stream << "c.j      . ";
-	    char sign = '+';
-	    if (imm < 0) { sign = '-'; imm = -imm; }
-	    stream << sign << " 0x" << std::hex << imm;
-	  }
-	  break;
-
-	case 6:  // c.beqz
-	  {
-	    CbFormInst cbf(inst);
-	    printBranchInst(stream, "c.beqz", 8+cbf.bits.rs1p, cbf.immed());
-	  }
-	  break;
-
-	case 7:  // c.bnez
-	  {
-	    CbFormInst cbf(inst);
-	    printBranchInst(stream, "c.bnez", 8+cbf.bits.rs1p, cbf.immed());
-	  }
-	  break;
-	}
-      break;
-
-    case 2:    // quadrant 2
-      switch (funct3)
-	{
-	case 0:  // c.slli c.slli64
-	  {
-	    CiFormInst cif(inst);
-	    unsigned immed = unsigned(cif.slliImmed()), rd = cif.bits.rd;
-	    if (cif.bits.ic5 != 0 and not isRv64())
-	      stream << "illegal";
-	    else
-	      stream << "c.slli   " << intRegs_.regName(rd, abiNames_) << ", "
-		     << immed;
-	  }
-	  break;
-
-	case 1:   // c.fldsp, c.lqsp
-	  stream << "illegal";
-	  break;
-
-	case 2:  // c.lwsp
-	  {
-	    CiFormInst cif(inst);
-	    unsigned rd = cif.bits.rd;
-	    // rd == 0 is legal per Andrew Watterman
-	    stream << "c.lwsp   " << intRegs_.regName(rd, abiNames_) << ", 0x"
-		   << std::hex << cif.lwspImmed();
-	  }
-	break;
-
-	case 3:  // c.flwsp c.ldsp
-	  if (isRv64())
-	    {
-	      CiFormInst cif(inst);
-	      unsigned rd = cif.bits.rd;
-	      stream << "c.ldsp   " << intRegs_.regName(rd, abiNames_) << ", 0x"
-		     << std::hex << cif.ldspImmed();
-	    }
-	  else
-	    {
-	      stream << "illegal";  // c.flwsp
-	    }
-	  break;
-
-	case 4:  // c.jr c.mv c.ebreak c.jalr c.add
-	  {
-	    CiFormInst cif(inst);
-	    unsigned immed = cif.addiImmed();
-	    unsigned rd = cif.bits.rd;
-	    unsigned rs2 = immed & 0x1f;
-	    std::string rdName = intRegs_.regName(rd, abiNames_);
-	    std::string rs2Name = intRegs_.regName(rs2, abiNames_);
-	    if ((immed & 0x20) == 0)
-	      {
-		if (rs2 == 0)
-		  {
-		    if (rd == 0)
-		      stream << "illegal";
-		    else
-		      stream << "c.jr     " << rdName;
-		  }
-		else
-		  {
-		    if (rd == 0)
-		      stream << "illegal";
-		    else
-		      stream << "c.mv     " << rdName << ", " << rs2Name;
-		  }
-	      }
-	    else
-	      {
-		if (rs2 == 0)
-		  {
-		    if (rd == 0)
-		      stream << "c.ebreak";
-		    else
-		      stream << "c.jalr   " << rdName;
-		  }
-		else
-		  {
-		    if (rd == 0)
-		      stream << "illegal";
-		    else
-		      stream << "c.add    " << rdName << ", " << rs2Name;
-		  }
-	      }
-	  }
-	  break;
-
-	case 5:  // c.fsdsp  c.sqsp
-	  stream << "illegal";
-	  break;
-
-	case 6:  // c.swsp
-	  {
-	    CswspFormInst csw(inst);
-	    stream << "c.swsp   " << intRegs_.regName(csw.bits.rs2, abiNames_)
-		   << ", 0x" << std::hex << csw.swImmed();
-	  }
-	  break;
-
-	case 7:  // c.fswsp c.sdsp
-	  {
-	    if (isRv64())  // c.sdsp
-	      {
-		CswspFormInst csw(inst);
-		stream << "c.sdsp   " << intRegs_.regName(csw.bits.rs2, abiNames_)
-		       << ", 0x" << std::hex << csw.sdImmed();
-	      }
-	  else
-	    {
-	      stream << "illegal";    // c.fwsp
-	    }
-	  }
-	  break;
-	}
-      break;
-
-    case 3:  // quadrant 3
-      stream << "illegal";
-      break;
-
-    default:
-      stream << "illegal";
-      break;
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::disassembleInst32(uint32_t inst, std::string& str)
-{
-  str.clear();
-
-  std::ostringstream oss;
-  disassembleInst32(inst, oss);
-  str = oss.str();
-}
-
-
-template <typename URV>
-void
-Core<URV>::disassembleInst16(uint16_t inst, std::string& str)
-{
-  str.clear();
-
-  std::ostringstream oss;
-  disassembleInst16(inst, oss);
-  str = oss.str();
-}
-
-
-template <typename URV>
 void
 Core<URV>::enableInstructionFrequency(bool b)
 {
@@ -7293,7 +4963,7 @@ Core<URV>::execSlli(uint32_t rd, uint32_t rs1, int32_t amount)
 {
   if ((amount & 0x20) and not rv64_)
     {
-      illegalInst();  // Bit 5 of shift amount cannot be zero in 32-bit.
+      illegalInst();  // Bit 5 of shift amount cannot be one in 32-bit.
       return;
     }
 
@@ -7477,294 +5147,6 @@ Core<URV>::execFencei(uint32_t, uint32_t, int32_t)
 }
 
 
-static void
-copyStatBufferToRiscv(const struct stat& buff, void* rvBuff)
-{
-  // Copy x86 stat buffer to riscv kernel_stat buffer.
-  char* ptr = (char*) rvBuff;
-  *((uint64_t*) ptr) = buff.st_dev;             ptr += 8;
-  *((uint64_t*) ptr) = buff.st_ino;             ptr += 8;
-  *((uint32_t*) ptr) = buff.st_mode;            ptr += 4;
-  *((uint32_t*) ptr) = buff.st_nlink;           ptr += 4;
-  *((uint32_t*) ptr) = buff.st_uid;             ptr += 4;
-  *((uint32_t*) ptr) = buff.st_gid;             ptr += 4;
-  *((uint64_t*) ptr) = buff.st_rdev;            ptr += 8;
-  /* __pad1 */                                  ptr += 8;
-  *((uint64_t*) ptr) = buff.st_size;            ptr += 8;
-
-#ifdef __APPLE__
-  // TODO: adapt code for Mac OS.
-  ptr += 40;
-#else
-  *((uint32_t*) ptr) = buff.st_blksize;         ptr += 4;
-  /* __pad2 */                                  ptr += 4;
-  *((uint64_t*) ptr) = buff.st_blocks;          ptr += 8;
-  *((uint32_t*) ptr) = buff.st_atim.tv_sec;     ptr += 4;
-  *((uint32_t*) ptr) = buff.st_atim.tv_nsec;    ptr += 4;
-  *((uint32_t*) ptr) = buff.st_mtim.tv_sec;     ptr += 4;
-  *((uint32_t*) ptr) = buff.st_mtim.tv_nsec;    ptr += 4;
-  *((uint32_t*) ptr) = buff.st_ctim.tv_sec;     ptr += 4;
-  *((uint32_t*) ptr) = buff.st_ctim.tv_nsec;    ptr += 4;
-#endif
-}
-
-
-template <typename URV>
-URV
-Core<URV>::emulateNewlib()
-{
-  // Preliminary. Need to avoid using syscall numbers.
-
-  URV a0 = intRegs_.read(RegA0);
-  URV a1 = intRegs_.read(RegA1);
-  URV a2 = intRegs_.read(RegA2);
-  URV a3 = intRegs_.read(RegA3);
-  URV num = intRegs_.read(RegA7);
-
-  switch (num)
-    {
-    case 56:       // openat
-      {
-	int dirfd = a0;
-
-	size_t pathAddr = 0;
-	if (not memory_.getSimMemAddr(a1, pathAddr))
-	  return SRV(-1);
-	const char* path = (const char*) pathAddr;
-
-	int flags = a2;
-	int x86Flags = 0;
-	if (flags & 1) x86Flags |= O_WRONLY;
-	if (flags & 0x200) x86Flags |= O_CREAT;
-
-	mode_t mode = a3;
-	int rc = openat(dirfd, path, x86Flags, mode);
-	return SRV(rc);
-      }
-
-    case 66:       // writev
-      {
-	int fd = a0;
-
-	size_t iovAddr = 0;
-	if (not memory_.getSimMemAddr(a1, iovAddr))
-	  return SRV(-1);
-
-	int count = a2;
-
-	unsigned errors = 0;
-	struct iovec* iov = new struct iovec [count];
-	for (int i = 0; i < count; ++i)
-	  {
-	    URV* vec = (URV*) iovAddr;
-	    URV base = vec[i*2];
-	    URV len = vec[i*2+1];
-	    size_t addr = 0;
-	    if (not memory_.getSimMemAddr(base, addr))
-	      {
-		errors++;
-		break;
-	      }
-	    iov[i].iov_base = (void*) addr;
-	    iov[i].iov_len = len;
-	  }
-	ssize_t rc = -1;
-	if (not errors)
-	  rc = writev(fd, iov, count);
-	delete [] iov;
-	return SRV(rc);
-      }
-
-    case 78:       // readlinat
-      {
-	int dirfd = a0;
-	URV path = a1;
-	URV buf = a2;
-	URV bufSize = a3;
-
-	size_t pathAddr = 0;
-	if (not memory_.getSimMemAddr(path, pathAddr))
-	  return SRV(-1);
-
-	size_t bufAddr = 0;
-	if (not memory_.getSimMemAddr(buf, bufAddr))
-	  return SRV(-1);
-	ssize_t rc = readlinkat(dirfd, (const char*) pathAddr,
-				(char*) bufAddr, bufSize);
-	return SRV(rc);
-      }
-
-    case 79:       // fstatat
-      {
-	int dirFd = a0;
-
-	size_t pathAddr = 0;
-	if (not memory_.getSimMemAddr(a1, pathAddr))
-	  return SRV(-1);
-
-	size_t rvBuff = 0;
-	if (not memory_.getSimMemAddr(a2, rvBuff))
-	  return SRV(-1);
-
-	int flags = a3;
-
-	struct stat buff;
-	SRV rv = fstatat(dirFd, (char*) pathAddr, &buff, flags);
-	if (rv < 0)
-	  return rv;
-
-	// RvBuff contains an address: We cast it to a pointer.
-	copyStatBufferToRiscv(buff, (void*) rvBuff);
-	return rv;
-      }
-
-    case 80:       // fstat
-      {
-	int fd = a0;
-	size_t rvBuff = 0;
-	if (not memory_.getSimMemAddr(a1, rvBuff))
-	  return SRV(-1);
-	struct stat buff;
-	SRV rv = fstat(fd, &buff);
-	if (rv < 0)
-	  return rv;
-
-	// RvBuff contains an address: We cast it to a pointer.
-	copyStatBufferToRiscv(buff, (void*) rvBuff);
-	return rv;
-      }
-
-    case 214: // brk
-      {
-	if (a0 < progBreak_)
-	  return progBreak_;
-	progBreak_ = a0;
-	return a0;
-      }
-
-    case 57: // close
-      {
-	int fd = a0;
-	SRV rv = 0;
-	if (fd > 2)
-	  rv = close(fd);
-	return rv;
-      }
-
-    case 63: // read
-      {
-	int fd = a0;
-	size_t buffAddr = 0;
-	if (not memory_.getSimMemAddr(a1, buffAddr))
-	  return SRV(-1);
-	size_t count = a2;
-	ssize_t rv = read(fd, (void*) buffAddr, count);
-	return URV(rv);
-      }
-
-    case 64: // write
-      {
-	int fd = a0;
-	size_t buffAddr = 0;
-	if (not memory_.getSimMemAddr(a1, buffAddr))
-	  return SRV(-1);
-	size_t count = a2;
-	auto rv = write(fd, (void*) buffAddr, count);
-	return URV(rv);
-      }
-
-    case 93:  // exit
-      {
-	throw CoreException(CoreException::Exit, "", 0, a0);
-	return 0;
-      }
-
-    case 94:  // exit_group
-      {
-	throw CoreException(CoreException::Exit, "", 0, a0);
-	return 0;
-      }
-
-    case 160: // uname
-      {
-	// Assumes that x86 and rv Linux have same layout for struct utsname.
-	size_t buffAddr = 0;
-	if (not memory_.getSimMemAddr(a0, buffAddr))
-	  return SRV(-1);
-	struct utsname* uts = (struct utsname*) buffAddr;
-	int rc = uname(uts);
-	strcpy(uts->release, "4.14.0");
-	return SRV(rc);
-      }
-
-    case 174: // getuid
-      {
-	SRV rv = getuid();
-	return rv;
-      }
-
-    case 175: // geteuid
-      {
-	SRV rv = geteuid();
-	return rv;
-      }
-
-    case 176: // getgid
-      {
-	SRV rv = getgid();
-	return rv;
-      }
-
-    case 177: // getegid
-      {
-	SRV rv = getegid();
-	return rv;
-      }
-
-    case 1024: // open
-      {
-	size_t pathAddr = 0;
-	if (not memory_.getSimMemAddr(a0, pathAddr))
-	  return SRV(-1);
-	int flags = a1;
-	int x86Flags = 0;
-	if (flags & 1) x86Flags |= O_WRONLY;
-	if (flags & 0x200) x86Flags |= O_CREAT;
-	int mode = a2;
-	SRV fd = open((const char*) pathAddr, x86Flags, mode);
-	return fd;
-      }
-
-    case 1038: // stat
-      {
-	size_t filePathAddr = 0;
-	if (not memory_.getSimMemAddr(a0, filePathAddr))
-	  return SRV(-1);
-
-	// FilePathAddr contains an address: We cast it to a pointer.
-	struct stat buff;
-	SRV rv = stat((char*) filePathAddr, &buff);
-	if (rv < 0)
-	  return rv;
-
-	size_t rvBuff = 0;
-	if (not memory_.getSimMemAddr(a1, rvBuff))
-	  return SRV(-1);
-
-	// RvBuff contains an address: We cast it to a pointer.
-	copyStatBufferToRiscv(buff, (void*) rvBuff);
-	return rv;
-      }
-
-    default:
-      break;
-    }
-
-  std::cerr << "Unimplemented syscall number " << num << "\n";
-  return -1;
-}
-
-
 template <typename URV>
 bool
 Core<URV>::validateAmoAddr(URV addr, unsigned accessSize)
@@ -7777,10 +5159,7 @@ Core<URV>::validateAmoAddr(URV addr, unsigned accessSize)
     {
       // Per spec cause is store-access-fault.
       if (not triggerTripped_)
-	{
-	  ldStException_ = true;
-	  initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
-	}
+	initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
       return false;
     }
 
@@ -7788,10 +5167,7 @@ Core<URV>::validateAmoAddr(URV addr, unsigned accessSize)
     {
       // Per spec cause is store-access-fault.
       if (not triggerTripped_)
-	{
-	  ldStException_ = true;
-	  initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
-	}
+	initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
       return false;
     }
 
@@ -7872,6 +5248,11 @@ Core<URV>::execEcall(uint32_t, uint32_t, int32_t)
   if (triggerTripped_)
     return;
 
+  // We do not update minstret on exceptions but it should be
+  // updated for an ecall. Compensate.
+  if (not isDebugModeStopCount(*this))
+    ++retiredInsts_;
+
   if (newlib_)
     {
       URV a0 = emulateNewlib();
@@ -7887,6 +5268,7 @@ Core<URV>::execEcall(uint32_t, uint32_t, int32_t)
     initiateException(ExceptionCause::U_ENV_CALL, currPc_, 0);
   else
     assert(0 and "Invalid privilege mode in execEcall");
+
 }
 
 
@@ -7908,12 +5290,17 @@ Core<URV>::execEbreak(uint32_t, uint32_t, int32_t)
 	      // The documentation (RISCV external debug support) does
 	      // not say whether or not we set EPC and MTVAL.
 	      enterDebugMode(DebugModeCause::EBREAK, currPc_);
-	      ebreakInst_ = true;
+	      ebreakInstDebug_ = true;
 	      recordCsrWrite(CsrNumber::DCSR);
 	      return;
 	    }
 	}
     }
+
+  // We do not update minstret on exceptions but it should be
+  // updated for an ebreak. Compensate.
+  if (not isDebugModeStopCount(*this))
+    ++retiredInsts_;
 
   URV savedPc = currPc_;  // Goes into MEPC.
   URV trapInfo = currPc_;  // Goes into MTVAL.
@@ -8098,10 +5485,28 @@ Core<URV>::execWfi(uint32_t, uint32_t, int32_t)
 
 
 template <typename URV>
-void
-Core<URV>::commitCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
-			  URV intRegVal)
+bool
+Core<URV>::doCsrRead(CsrNumber csr, URV& value)
 {
+  if (csRegs_.read(csr, privMode_, debugMode_, value))
+    return true;
+
+  illegalInst();
+  return false;
+}
+
+
+template <typename URV>
+void
+Core<URV>::doCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
+		      URV intRegVal)
+{
+  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
+    {
+      illegalInst();
+      return;
+    }
+
   // Make auto-increment happen before write for minstret and cycle.
   if (csr == CsrNumber::MINSTRET or csr == CsrNumber::MINSTRETH)
     retiredInsts_++;
@@ -8149,23 +5554,12 @@ Core<URV>::execCsrrw(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = intRegs_.read(rs1);
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8179,12 +5573,8 @@ Core<URV>::execCsrrs(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev | intRegs_.read(rs1);
   if (rs1 == 0)
@@ -8193,14 +5583,7 @@ Core<URV>::execCsrrs(uint32_t rd, uint32_t rs1, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8214,12 +5597,8 @@ Core<URV>::execCsrrc(uint32_t rd, uint32_t rs1, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev & (~ intRegs_.read(rs1));
   if (rs1 == 0)
@@ -8228,14 +5607,7 @@ Core<URV>::execCsrrc(uint32_t rd, uint32_t rs1, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8249,21 +5621,11 @@ Core<URV>::execCsrrwi(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (rd != 0 and not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
+  if (rd != 0)
+    if (not doCsrRead(csr, prev))
       return;
-    }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, imm, rd, prev);
+  doCsrWrite(csr, imm, rd, prev);
 }
 
 
@@ -8277,12 +5639,8 @@ Core<URV>::execCsrrsi(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev | imm;
   if (imm == 0)
@@ -8291,14 +5649,7 @@ Core<URV>::execCsrrsi(uint32_t rd, uint32_t imm, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8312,12 +5663,8 @@ Core<URV>::execCsrrci(uint32_t rd, uint32_t imm, int32_t c)
   CsrNumber csr = CsrNumber(c);
 
   URV prev = 0;
-  if (not csRegs_.read(csr, privMode_, debugMode_, prev))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
+  if (not doCsrRead(csr, prev))
+    return;
 
   URV next = prev & (~ imm);
   if (imm == 0)
@@ -8326,14 +5673,7 @@ Core<URV>::execCsrrci(uint32_t rd, uint32_t imm, int32_t c)
       return;
     }
 
-  if (not csRegs_.isWriteable(csr, privMode_, debugMode_))
-    {
-      illegalInst();
-      csrException_ = true;
-      return;
-    }
-
-  commitCsrWrite(csr, next, rd, prev);
+  doCsrWrite(csr, next, rd, prev);
 }
 
 
@@ -8388,9 +5728,7 @@ Core<URV>::store(URV base, URV addr, STORE_TYPE storeVal)
     {
       if (triggerTripped_)
 	return false;  // No exception if earlier trigger tripped.
-      forceAccessFail_ = false;
-      ldStException_ = true;
-      initiateException(ExceptionCause::STORE_ADDR_MISAL, currPc_, addr);
+      initiateStoreException(ExceptionCause::STORE_ADDR_MISAL, addr);
       return false;
     }
 
@@ -8441,9 +5779,7 @@ Core<URV>::store(URV base, URV addr, STORE_TYPE storeVal)
     }
 
   // Either force-fail or store failed.  Take exception.
-  forceAccessFail_ = false;
-  ldStException_ = true;
-  initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
+  initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
   return false;
 }
 
@@ -8530,9 +5866,8 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMul(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));  // sign extend to 64-bit
-    boost::multiprecision::int128_t b = int64_t(intRegs_.read(rs2));
+    Int128 a = int64_t(intRegs_.read(rs1));  // sign extend to 64-bit
+    Int128 b = int64_t(intRegs_.read(rs2));
 
     int64_t c = static_cast<int64_t>(a * b);
     intRegs_.write(rd, c);
@@ -8543,10 +5878,9 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMulh(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));  // sign extend.
-    boost::multiprecision::int128_t b = int64_t(intRegs_.read(rs2));
-    boost::multiprecision::int128_t c = a * b;
+    Int128 a = int64_t(intRegs_.read(rs1));  // sign extend.
+    Int128 b = int64_t(intRegs_.read(rs2));
+    Int128 c = a * b;
     int64_t high = static_cast<int64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -8558,9 +5892,9 @@ namespace WdRiscv
   Core<uint64_t>::execMulhsu(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
 
-    boost::multiprecision::int128_t a = int64_t(intRegs_.read(rs1));
-    boost::multiprecision::uint128_t b = intRegs_.read(rs2);
-    boost::multiprecision::int128_t c = a * b;
+    Int128 a = int64_t(intRegs_.read(rs1));
+    Int128 b = intRegs_.read(rs2);
+    Int128 c = a * b;
     int64_t high = static_cast<int64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -8571,9 +5905,9 @@ namespace WdRiscv
   void
   Core<uint64_t>::execMulhu(uint32_t rd, uint32_t rs1, int32_t rs2)
   {
-    boost::multiprecision::uint128_t a = intRegs_.read(rs1);
-    boost::multiprecision::uint128_t b = intRegs_.read(rs2);
-    boost::multiprecision::uint128_t c = a * b;
+    Uint128 a = intRegs_.read(rs1);
+    Uint128 b = intRegs_.read(rs2);
+    Uint128 c = a * b;
     uint64_t high = static_cast<uint64_t>(c >> 64);
 
     intRegs_.write(rd, high);
@@ -9595,7 +6929,7 @@ Core<URV>::execFmv_x_w(uint32_t rd, uint32_t rs1, int32_t)
   intRegs_.write(rd, value);
 }
 
-
+ 
 template <typename URV>
 void
 Core<URV>::execFeq_s(uint32_t rd, uint32_t rs1, int32_t rs2)
@@ -10873,54 +8207,6 @@ Core<uint64_t>::execFmv_x_d(uint32_t rd, uint32_t rs1, int32_t)
 
 
 template <typename URV>
-void
-Core<URV>::execAmoadd_w(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad32(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      // Sign extend least significant word of register value.
-      SRV rdVal = SRV(int32_t(loadedValue));
-
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val + rdVal;
-
-      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
-void
-Core<URV>::execAmoswap_w(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV loadedValue = 0;
-  bool loadOk = amoLoad32(rs1, loadedValue);
-  if (loadOk)
-    {
-      URV addr = intRegs_.read(rs1);
-
-      // Sign extend least significant word of register value.
-      SRV rdVal = SRV(int32_t(loadedValue));
-
-      URV rs2Val = intRegs_.read(rs2);
-      URV result = rs2Val;
-
-      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
-
-      if (storeOk and not triggerTripped_)
-	intRegs_.write(rd, rdVal);
-    }
-}
-
-
-template <typename URV>
 template <typename LOAD_TYPE>
 void
 Core<URV>::loadReserve(uint32_t rd, uint32_t rs1)
@@ -10989,7 +8275,7 @@ void
 Core<URV>::execLr_w(uint32_t rd, uint32_t rs1, int32_t)
 {
   loadReserve<int32_t>(rd, rs1);
-  if (ldStException_ or triggerTripped_)
+  if (hasException_ or triggerTripped_)
     return;
 
   hasLr_ = true;
@@ -11021,9 +8307,7 @@ Core<URV>::storeConditional(URV addr, STORE_TYPE storeVal)
     {
       if (triggerTripped_)
 	return false; // No exception if earlier trigger.
-      forceAccessFail_ = false;
-      ldStException_ = true;
-      initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
+      initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
       return false;
     }
 
@@ -11031,9 +8315,7 @@ Core<URV>::storeConditional(URV addr, STORE_TYPE storeVal)
     {
       if (triggerTripped_)
 	return false;  // No exception if earlier trigger.
-      forceAccessFail_ = false;
-      ldStException_ = true;
-      initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
+      initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
       return false;
     }
 
@@ -11072,9 +8354,7 @@ Core<URV>::storeConditional(URV addr, STORE_TYPE storeVal)
     }
   else
     {
-      forceAccessFail_ = false;
-      ldStException_ = true;
-      initiateException(ExceptionCause::STORE_ACC_FAULT, currPc_, addr);
+      initiateStoreException(ExceptionCause::STORE_ACC_FAULT, addr);
     }
 
   return false;
@@ -11097,7 +8377,7 @@ Core<URV>::execSc_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 
   hasLr_ = false;
 
-  if (ldStException_ or triggerTripped_)
+  if (hasException_ or triggerTripped_)
     return;
 
   intRegs_.write(rd, 1);  // fail
@@ -11106,8 +8386,68 @@ Core<URV>::execSc_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 
 template <typename URV>
 void
+Core<URV>::execAmoadd_w(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad32(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      // Sign extend least significant word of register value.
+      SRV rdVal = SRV(int32_t(loadedValue));
+
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val + rdVal;
+
+      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
+Core<URV>::execAmoswap_w(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
+  URV loadedValue = 0;
+  bool loadOk = amoLoad32(rs1, loadedValue);
+  if (loadOk)
+    {
+      URV addr = intRegs_.read(rs1);
+
+      // Sign extend least significant word of register value.
+      SRV rdVal = SRV(int32_t(loadedValue));
+
+      URV rs2Val = intRegs_.read(rs2);
+      URV result = rs2Val;
+
+      bool storeOk = store<uint32_t>(addr, addr, uint32_t(result));
+
+      if (storeOk and not triggerTripped_)
+	intRegs_.write(rd, rdVal);
+    }
+}
+
+
+template <typename URV>
+void
 Core<URV>::execAmoxor_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11132,6 +8472,10 @@ template <typename URV>
 void
 Core<URV>::execAmoor_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11156,6 +8500,10 @@ template <typename URV>
 void
 Core<URV>::execAmoand_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11180,6 +8528,10 @@ template <typename URV>
 void
 Core<URV>::execAmomin_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
 
@@ -11205,6 +8557,10 @@ template <typename URV>
 void
 Core<URV>::execAmominu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11231,6 +8587,10 @@ template <typename URV>
 void
 Core<URV>::execAmomax_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11255,6 +8615,10 @@ template <typename URV>
 void
 Core<URV>::execAmomaxu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad32(rs1, loadedValue);
   if (loadOk)
@@ -11280,8 +8644,46 @@ Core<URV>::execAmomaxu_w(uint32_t rd, uint32_t rs1, int32_t rs2)
 
 template <typename URV>
 void
+Core<URV>::execLr_d(uint32_t rd, uint32_t rs1, int32_t)
+{
+  loadReserve<int64_t>(rd, rs1);
+  if (hasException_ or triggerTripped_)
+    return;
+
+  hasLr_ = true;
+  lrAddr_ = loadAddr_;
+  lrSize_ = 8;
+}
+
+
+template <typename URV>
+void
+Core<URV>::execSc_d(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  URV value = intRegs_.read(rs2);
+  URV addr = intRegs_.read(rs1);
+
+  if (storeConditional(addr, uint64_t(value)))
+    {
+      intRegs_.write(rd, 0); // success
+      return;
+    }
+
+  if (hasException_ or triggerTripped_)
+    return;
+
+  intRegs_.write(rd, 1);  // fail
+}
+
+
+template <typename URV>
+void
 Core<URV>::execAmoadd_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11304,6 +8706,10 @@ template <typename URV>
 void
 Core<URV>::execAmoswap_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11324,42 +8730,12 @@ Core<URV>::execAmoswap_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 
 template <typename URV>
 void
-Core<URV>::execLr_d(uint32_t rd, uint32_t rs1, int32_t)
-{
-  loadReserve<int64_t>(rd, rs1);
-  if (ldStException_ or triggerTripped_)
-    return;
-
-  hasLr_ = true;
-  lrAddr_ = loadAddr_;
-  lrSize_ = 8;
-}
-
-
-template <typename URV>
-void
-Core<URV>::execSc_d(uint32_t rd, uint32_t rs1, int32_t rs2)
-{
-  URV value = intRegs_.read(rs2);
-  URV addr = intRegs_.read(rs1);
-
-  if (storeConditional(addr, uint64_t(value)))
-    {
-      intRegs_.write(rd, 0); // success
-      return;
-    }
-
-  if (ldStException_ or triggerTripped_)
-    return;
-
-  intRegs_.write(rd, 1);  // fail
-}
-
-
-template <typename URV>
-void
 Core<URV>::execAmoxor_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11382,6 +8758,10 @@ template <typename URV>
 void
 Core<URV>::execAmoor_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11404,6 +8784,10 @@ template <typename URV>
 void
 Core<URV>::execAmoand_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11426,6 +8810,10 @@ template <typename URV>
 void
 Core<URV>::execAmomin_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11448,6 +8836,10 @@ template <typename URV>
 void
 Core<URV>::execAmominu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11470,6 +8862,10 @@ template <typename URV>
 void
 Core<URV>::execAmomax_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11492,6 +8888,10 @@ template <typename URV>
 void
 Core<URV>::execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
 {
+  // Lock mutex to serialize AMO instructions. Unlock automatically on
+  // exit from this scope.
+  std::lock_guard<std::mutex> lock(memory_.amoMutex_);
+
   URV loadedValue = 0;
   bool loadOk = amoLoad64(rs1, loadedValue);
   if (loadOk)
@@ -11505,8 +8905,368 @@ Core<URV>::execAmomaxu_d(uint32_t rd, uint32_t rs1, int32_t rs2)
       bool storeOk = store<URV>(addr, addr, result);
 
       if (storeOk and not triggerTripped_)
-        intRegs_.write(rd, rdVal);
+	intRegs_.write(rd, rdVal);
     }
+}
+
+
+template <typename URV>
+void
+Core<URV>::execClz(uint32_t rd, uint32_t rs1, int32_t)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+
+  if constexpr (sizeof(URV) == 4)
+    v1 = __builtin_clz(v1);
+  else
+    v1 = __builtin_clzl(v1);
+
+  intRegs_.write(rd, v1);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execCtz(uint32_t rd, uint32_t rs1, int32_t)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+
+  if constexpr (sizeof(URV) == 4)
+    v1 = __builtin_ctz(v1);
+  else
+    v1 = __builtin_ctzl(v1);
+
+  intRegs_.write(rd, v1);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execPcnt(uint32_t rd, uint32_t rs1, int32_t)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = __builtin_popcount(v1);
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execAndc(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV v2 = intRegs_.read(rs2);
+  URV res = v1 & ~v2;
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execSlo(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV mask = intRegs_.shiftMask();
+  URV shift = intRegs_.read(rs2) & mask;
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = ~((~v1) << shift);
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execSro(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV mask = intRegs_.shiftMask();
+  URV shift = intRegs_.read(rs2) & mask;
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = ~((~v1) >> shift);
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execSloi(uint32_t rd, uint32_t rs1, int32_t imm)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  if ((imm & 0x20) and not rv64_)
+    {
+      illegalInst();  // Bit 5 of shift amount cannot be one in 32-bit.
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = ~((~v1) << imm);
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execSroi(uint32_t rd, uint32_t rs1, int32_t imm)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  if ((imm & 0x20) and not rv64_)
+    {
+      illegalInst();  // Bit 5 of shift amount cannot be one in 32-bit.
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = ~((~v1) >> imm);
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execMin(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  SRV v1 = intRegs_.read(rs1);
+  SRV v2 = intRegs_.read(rs2);
+  SRV res = v1 < v2? v1 : v2;
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execMax(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  SRV v1 = intRegs_.read(rs1);
+  SRV v2 = intRegs_.read(rs2);
+  SRV res = v1 > v2? v1 : v2;
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execMinu(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV v2 = intRegs_.read(rs2);
+  URV res = v1 < v2? v1 : v2;
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execMaxu(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+  URV v2 = intRegs_.read(rs2);
+  URV res = v1 > v2? v1 : v2;
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execRol(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV mask = intRegs_.shiftMask();
+  URV rot = intRegs_.read(rs2) & mask;  // Rotate amount
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = (v1 << rot) | (v1 >> (intRegs_.regWidth() - rot));
+
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execRor(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV mask = intRegs_.shiftMask();
+  URV rot = intRegs_.read(rs2) & mask;  // Rotate amount
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = (v1 >> rot) | (v1 << (intRegs_.regWidth() - rot));
+
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execRori(uint32_t rd, uint32_t rs1, int32_t imm)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  if ((imm & 0x20) and not rv64_)
+    {
+      illegalInst();  // Bit 5 of rotate amount cannot be one in 32-bit.
+      return;
+    }
+
+  URV rot = imm;
+
+  URV v1 = intRegs_.read(rs1);
+  URV res = (v1 >> rot) | (v1 << (intRegs_.regWidth() - rot));
+
+  intRegs_.write(rd, res);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execBswap(uint32_t rd, uint32_t rs1, int32_t)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+
+  if constexpr (sizeof(URV) == 4)
+    v1 = __builtin_bswap32(v1);
+  else
+    v1 = __builtin_bswap64(v1);
+
+  intRegs_.write(rd, v1);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execBrev(uint32_t rd, uint32_t rs1, int32_t)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  URV v1 = intRegs_.read(rs1);
+
+  if constexpr (sizeof(URV) == 4)
+    {
+      v1 = ((v1 & 0xaaaaaaaa) >> 1) | ((v1 & 0x55555555) << 1);
+      v1 = ((v1 & 0xcccccccc) >> 2) | ((v1 & 0x33333333) << 2);
+      v1 = ((v1 & 0xf0f0f0f0) >> 4) | ((v1 & 0x0f0f0f0f) << 4);
+      v1 = __builtin_bswap32(v1);
+    }
+  else
+    {
+      v1 = ((v1 & 0xaaaaaaaaaaaaaaaa) >> 1) | ((v1 & 0x5555555555555555) << 1);
+      v1 = ((v1 & 0xcccccccccccccccc) >> 2) | ((v1 & 0x3333333333333333) << 2);
+      v1 = ((v1 & 0xf0f0f0f0f0f0f0f0) >> 4) | ((v1 & 0x0f0f0f0f0f0f0f0f) << 4);
+      v1 = __builtin_bswap64(v1);
+    }
+
+  intRegs_.write(rd, v1);
+}
+
+
+template <typename URV>
+void
+Core<URV>::execPack(uint32_t rd, uint32_t rs1, int32_t rs2)
+{
+  if (not isRvzbmini())
+    {
+      illegalInst();
+      return;
+    }
+
+  unsigned halfXlen = sizeof(URV)*4;
+  URV upper = intRegs_.read(rs1) << halfXlen;
+  URV lower = (intRegs_.read(rs2) << halfXlen) >> halfXlen;
+  URV res = upper | lower;
+  intRegs_.write(rd, res);
 }
 
 

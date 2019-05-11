@@ -117,6 +117,16 @@ namespace WdRiscv
     size_t intRegCount() const
     { return intRegs_.size(); }
 
+    /// Return the name of the given integer register. Return an
+    /// abi-name (e.g. sp) if abi names are enabled.
+    std::string intRegName(unsigned regIx) const
+    { return intRegs_.regName(regIx, abiNames_); }
+
+    /// Return the name (e.g. x1) or the abi-name (e.g. ra) of the
+    /// given integer register.
+    std::string intRegName(unsigned regIx, bool abiName) const
+    { return intRegs_.regName(regIx, abiName); }
+
     /// Return count of floating point registers. Return zero if
     /// extension f is not enabled.
     size_t fpRegCount() const
@@ -378,7 +388,7 @@ namespace WdRiscv
     /// op2 will be set. If inst is not a valid instruction , then we
     /// return a reference to the illegal-instruction info.
     const InstInfo& decode(uint32_t inst, uint32_t& op0, uint32_t& op1,
-			   int32_t& op2);
+			   int32_t& op2, int32_t& op3);
 
     /// Load the given hex file and set memory locations accordingly.
     /// Return true on success. Return false if file does not exists,
@@ -743,6 +753,10 @@ namespace WdRiscv
     bool isRvu() const
     { return rvu_; }
 
+    /// Return true if zbmini extension is enabled in this core.
+    bool isRvzbmini() const
+    { return rvzbmini_; }
+
     /// Return true if current program is considered finihsed (either
     /// reached stop address or executed exit limit).
     bool hasTargetProgramFinished() const
@@ -775,87 +789,6 @@ namespace WdRiscv
 
     /// Helper to whatIfSingleStep.
     void collectAndUndoWhatIfChanges(URV prevPc, ChangeRecord& record);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst rd, rs1, rs2
-    void printInstRdRs1Rs2(std::ostream&, const char* inst, unsigned rd,
-			   unsigned rs1, unsigned rs2);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst reg, reg, imm
-    /// where inst is a shift instruction.
-    void printInstShiftImm(std::ostream&, const char* inst, unsigned reg1,
-			   unsigned reg2, uint32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst reg, reg, imm
-    /// where imm is a 12 bit constant.
-    void printInstRegRegImm12(std::ostream&, const char* inst, unsigned reg1,
-			      unsigned reg2, int32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given branch
-    /// instruction which is of the form:  inst reg, reg, imm
-    /// where imm is a 12 bit constant.
-    void printBranchInst(std::ostream&, const char* inst, unsigned reg1,
-			 unsigned reg2, int32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst reg, imm
-    /// where inst is a compressed instruction.
-    void printInstRegImm(std::ostream&, const char* inst, unsigned reg1,
-			 int32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// compressed branch instruction which is of the form: inst reg, imm.
-    void printBranchInst(std::ostream& stream, const char* inst,
-			 unsigned rs1, int32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst reg1, imm(reg2)
-    void printInstLdSt(std::ostream&, const char* inst, unsigned reg1,
-		       unsigned reg2, int32_t imm);
-
-    /// Helper to disassemble method. Print on the given stream given
-    /// instruction which is of the form:  inst reg1, imm(reg2)
-    /// where inst is a floating point ld/st instruction.
-    void printInstFpLdSt(std::ostream&, const char* inst, unsigned reg1,
-			 unsigned reg2, int32_t imm);
-
-    /// Helper to disassemble method.
-    void printAmoInst(std::ostream&, const char* inst, bool aq,
-		      bool rl, unsigned rd, unsigned rs1, unsigned rs2);
-
-    /// Helper to disassemble method.
-    void printLrInst(std::ostream&, const char* inst, bool aq,
-		     bool rl, unsigned rd, unsigned rs1);
-
-    /// Helper to disassemble method.
-    void printScInst(std::ostream&, const char* inst, bool aq,
-		     bool rl, unsigned rd, unsigned rs1, unsigned rs2);
-
-    /// Helper to disassemble methods. Print an rv32f floating point
-    /// instruction with 4 operands.
-    void printFp32f(std::ostream&, const char* inst,
-		    unsigned rd, unsigned rs1, unsigned rs2,
-		    unsigned rs3, RoundingMode mode);
-
-    /// Helper to disassemble methods. Print an rv32d floating point
-    /// instruction with 4 operands.
-    void printFp32d(std::ostream&, const char* inst,
-		    unsigned rd, unsigned rs1, unsigned rs2,
-		    unsigned rs3, RoundingMode mode);
-
-    /// Helper to disassemble methods. Print an rv32f floating point
-    /// instruction with 3 operands.
-    void printFp32f(std::ostream&, const char* inst,
-		    unsigned rd, unsigned rs1, unsigned rs2,
-		    RoundingMode mode);
-
-    /// Helper to disassemble methods. Print an rv32d floating point
-    /// instruction with 3 operands.
-    void printFp32d(std::ostream&, const char* inst,
-		    unsigned rd, unsigned rs1, unsigned rs2,
-		    RoundingMode mode);
 
     /// Return the effective rounding mode for the currently executing
     /// floating point instruction. This assumes that execute32 or
@@ -890,6 +823,10 @@ namespace WdRiscv
     /// cause and data address.
     void initiateLoadException(ExceptionCause cause, URV addr, unsigned ldSize);
 
+    /// Helper to store methods: Initiate an exception with the given
+    /// cause and data address.
+    void initiateStoreException(ExceptionCause cause, URV addr);
+
     /// Helper to load methods: Return true if base and effective
     /// address fall in regions of different types (with respect to io
     /// and cacheability).
@@ -923,10 +860,15 @@ namespace WdRiscv
     /// Helper to CSR instructions. Keep minstret and mcycle up to date.
     void preCsrInstruction(CsrNumber csr);
 
-    /// Helper to CSR instructions: Write csr and integer register.
-    /// Write next value to csr.
-    void commitCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
-			URV intRegVal);
+    /// Helper to CSR instructions: Write csr and integer register if csr
+    /// is writeable.
+    void doCsrWrite(CsrNumber csr, URV csrVal, unsigned intReg,
+		    URV intRegVal);
+
+    /// Helper to CSR instructions: Read csr register returning true
+    /// on success and false on failure (csr does not exist or is not
+    /// accessible).  is writeable.
+    bool doCsrRead(CsrNumber csr, URV& csrVal);
 
     /// Return true if one or more load-address/store-address trigger
     /// has a hit on the given address and given timing
@@ -1292,6 +1234,26 @@ namespace WdRiscv
     void execwaitirq (uint32_t rd, uint32_t rs1, int32_t rs2);
     void exectimer (uint32_t rd, uint32_t rs1, int32_t rs2);
 
+    // Bit manipulation
+    void execClz(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execCtz(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execPcnt(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execAndc(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execSlo(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execSro(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execSloi(uint32_t rd, uint32_t rs1, int32_t imm);
+    void execSroi(uint32_t rd, uint32_t rs1, int32_t imm);
+    void execMin(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execMax(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execMinu(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execMaxu(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execRol(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execRor(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execRori(uint32_t rd, uint32_t rs1, int32_t imm);
+    void execBswap(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execBrev(uint32_t rd, uint32_t rs1, int32_t rs2);
+    void execPack(uint32_t rd, uint32_t rs1, int32_t rs2);
+
 
   public:
 
@@ -1364,6 +1326,7 @@ namespace WdRiscv
     bool isBType = false;        // True if current instruction is B-type.
     bool isUType = false;        // True if current instruction is U-type.
     bool isJType = false;        // True if current instruction is J-type.
+    bool rvzbmini_ = false;      // True if extension zbmini enabled.
     URV pc_ = 0;                 // Program counter. Incremented by instr fetch.
     URV currPc_ = 0;             // Addr instr being executed (pc_ before fetch).
     URV resetPc_ = 0;            // Pc to use on reset.
@@ -1380,7 +1343,7 @@ namespace WdRiscv
     NmiCause nmiCause_ = NmiCause::UNKNOWN;
 
     // These should be cleared before each instruction when triggers enabled.
-    bool ldStException_ = 0;     // True if there is a load/store exception.
+    bool hasException_ = 0;      // True if current inst has an exception.
     bool csrException_ = 0;      // True if there is a CSR related exception.
     bool triggerTripped_ = 0;    // True if a trigger trips.
 
@@ -1438,7 +1401,7 @@ namespace WdRiscv
     bool debugStepMode_ = false;     // True in debug step mode.
     bool dcsrStepIe_ = false;        // True if stepie bit set in dcsr.
     bool dcsrStep_ = false;          // True if step bit set in dcsr.
-    bool ebreakInst_ = false;        // True if ebreak was executed.
+    bool ebreakInstDebug_ = false;   // True if debug mode entered from ebreak.
     bool storeErrorRollback_ = false;
     bool loadErrorRollback_ = false;
     bool targetProgFinished_ = false;

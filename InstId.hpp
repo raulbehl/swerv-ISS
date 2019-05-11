@@ -98,6 +98,10 @@ namespace WdRiscv
       // Custom insts
       getq, setq, retirq, maskirq, waitirq, timer,
 
-      maxId = c_sdsp
+      // zbmini
+      clz, ctz, pcnt, andc, slo, sro, sloi, sroi, min, max, minu, maxu,
+      rol, ror, rori, bswap, brev, pack,
+
+      maxId = pack
     };
 }
