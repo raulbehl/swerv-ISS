@@ -30,6 +30,7 @@ uint32_t  inst= 0;
 uint32_t  op0 = 0;
 uint32_t  op1 = 0;
 int32_t   op2 = 0;
+int32_t   op3 = 0;
 
 WdRiscv::Memory memory(memorySize);
 template <typename XLEN>
@@ -332,7 +333,7 @@ void issDecode () {
   // Get the instruction at Current PC
   fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
   // Decode the instruction
-  info = core<uint32_t>.decode(inst, op0, op1, op2);
+  info = core<uint32_t>.decode(inst, op0, op1, op2, op3);
   return;
 }
 
@@ -344,7 +345,7 @@ int issCompareInst (uint32_t spirit_pc_rdata, uint32_t spirit_inst) {
 
   fetchOK = core<uint32_t>.fetchInst(prevPC, inst);
   // Decode the instruction
-  info = core<uint32_t>.decode(inst, op0, op1, op2);
+  info = core<uint32_t>.decode(inst, op0, op1, op2, op3);
 
   if (prevPC != spirit_pc_rdata) {
       fprintf (stdout, "RTL PC: %-.8x\t ISS PC: %-.8x\n", spirit_pc_rdata, prevPC);

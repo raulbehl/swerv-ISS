@@ -168,6 +168,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (immed == 0)
 	    return instTable_.getInstInfo(InstId::illegal);
 	  op0 = 8 + ciwf.bits.rdp; op1 = RegSp; op2 = immed;
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_addi4spn);
 	}
 
@@ -177,6 +178,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	    return instTable_.getInstInfo(InstId::illegal);
 	  ClFormInst clf(inst);
 	  op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.ldImmed();
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_fld);
 	}
 
@@ -184,6 +186,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  ClFormInst clf(inst);
 	  op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.lwImmed();
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_lw);
 	}
 
@@ -193,6 +196,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (isRv64())
 	    {
 	      op0 = 8+clf.bits.rdp; op1 = 8+clf.bits.rs1p; op2 = clf.ldImmed();
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_ld);
 	    }
 
@@ -210,6 +214,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CsFormInst cs(inst);
 	  op0 = 8+cs.bits.rs1p; op1 = 8+cs.bits.rs2p; op2 = cs.swImmed();
+    isSType = true;
 	  return instTable_.getInstInfo(InstId::c_sw);
 	}
 
@@ -226,6 +231,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	      return instTable_.getInstInfo(InstId::illegal);
 	    }
 	  op0=8+cs.bits.rs1p; op1=8+cs.bits.rs2p; op2 = cs.sdImmed();
+    isSType = true;
 	  return instTable_.getInstInfo(InstId::c_sd);
 	}
 
@@ -239,6 +245,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CiFormInst cif(inst);
 	  op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = cif.addiImmed();
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_addi);
 	}
 	  
@@ -249,13 +256,16 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	      CiFormInst cif(inst);
 	      if (cif.bits.rd == 0)
 		return instTable_.getInstInfo(InstId::illegal);
-	      else
-		return instTable_.getInstInfo(InstId::c_addiw);
+	      else {
+          isIType = true;
+          return instTable_.getInstInfo(InstId::c_addiw);
+        }
 	    }
 	  else
 	    {
 	      CjFormInst cjf(inst);
 	      op0 = RegRa; op1 = cjf.immed(); op2 = 0;
+        isJType = true;
 	      return instTable_.getInstInfo(InstId::c_jal);
 	    }
 	}
@@ -264,6 +274,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CiFormInst cif(inst);
 	  op0 = cif.bits.rd; op1 = RegX0; op2 = cif.addiImmed();
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_li);
 	}
 
@@ -276,9 +287,11 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (cif.bits.rd == RegSp)  // c.addi16sp
 	    {
 	      op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = immed16;
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_addi16sp);
 	    }
 	  op0 = cif.bits.rd; op1 = cif.luiImmed(); op2 = 0;
+    isUType = true;
 	  return instTable_.getInstInfo(InstId::c_lui);
 	}
 
@@ -293,8 +306,9 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (f2 == 0) // srli64, srli
 	    {
 	      if (caf.bits.ic5 != 0 and not isRv64())
-		return instTable_.getInstInfo(InstId::illegal);
+        return instTable_.getInstInfo(InstId::illegal);
 	      op0 = rd; op1 = rd; op2 = caf.shiftImmed();
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_srli);
 	    }
 	  if (f2 == 1)  // srai64, srai
@@ -302,11 +316,13 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	      if (caf.bits.ic5 != 0 and not isRv64())
 		return instTable_.getInstInfo(InstId::illegal);
 	      op0 = rd; op1 = rd; op2 = caf.shiftImmed();
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_srai);
 	    }
 	  if (f2 == 2)  // c.andi
 	    {
 	      op0 = rd; op1 = rd; op2 = immed;
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_andi);
 	    }
 
@@ -317,6 +333,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  op0 = rd; op1 = rd; op2 = rs2;
 	  if ((immed & 0x20) == 0)  // Bit 5 of immed
 	    {
+        isRType = true;
 	      if (imm34 == 0) return instTable_.getInstInfo(InstId::c_sub);
 	      if (imm34 == 1) return instTable_.getInstInfo(InstId::c_xor);
 	      if (imm34 == 2) return instTable_.getInstInfo(InstId::c_or);
@@ -325,7 +342,14 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  // Bit 5 of immed is 1
 	  if (not isRv64())
 	    return instTable_.getInstInfo(InstId::illegal);
-	  if (imm34 == 0) return instTable_.getInstInfo(InstId::c_subw);
+	  if (imm34 == 0) {
+      isRType = true;
+      return instTable_.getInstInfo(InstId::c_subw);
+    }
+	  if (imm34 == 1) {
+      isRType = true;
+      return instTable_.getInstInfo(InstId::c_addw);
+    }
 	  if (imm34 == 1) return instTable_.getInstInfo(InstId::c_addw);
 	  if (imm34 == 2) return instTable_.getInstInfo(InstId::illegal);
 	  return instTable_.getInstInfo(InstId::illegal);
@@ -335,6 +359,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CjFormInst cjf(inst);
 	  op0 = RegX0; op1 = cjf.immed(); op2 = 0;
+    isJType = true;
 	  return instTable_.getInstInfo(InstId::c_j);
 	}
 	  
@@ -342,12 +367,14 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CbFormInst cbf(inst);
 	  op0=8+cbf.bits.rs1p; op1=RegX0; op2=cbf.immed();
+    isBType = true;
 	  return instTable_.getInstInfo(InstId::c_beqz);
 	}
       
       // funct3 == 7: c.bnez
       CbFormInst cbf(inst);
       op0 = 8+cbf.bits.rs1p; op1=RegX0; op2=cbf.immed();
+      isBType = true;
       return instTable_.getInstInfo(InstId::c_bnez);
     }
 
@@ -360,6 +387,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (cif.bits.ic5 != 0 and not isRv64())
 	    return instTable_.getInstInfo(InstId::illegal);
 	  op0 = cif.bits.rd; op1 = cif.bits.rd; op2 = immed;
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_slli);
 	}
 
@@ -380,6 +408,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  unsigned rd = cif.bits.rd;
 	  // rd == 0 is legal per Andrew Watterman
 	  op0 = rd; op1 = RegSp; op2 = cif.lwspImmed();
+    isIType = true;
 	  return instTable_.getInstInfo(InstId::c_lwsp);
 	}
 
@@ -390,11 +419,13 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	  if (isRv64())
 	    {
 	      op0 = rd; op1 = RegSp; op2 = cif.ldspImmed();
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_ldsp);
 	    }
 	  if (isRvf())
 	    {
 	      op0 = rd; op1 = RegSp; op2 = cif.lwspImmed();
+        isIType = true;
 	      return instTable_.getInstInfo(InstId::c_lwsp);
 	    }
 	  return instTable_.getInstInfo(InstId::illegal);
@@ -413,9 +444,11 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 		  if (rd == RegX0)
 		    return instTable_.getInstInfo(InstId::illegal);
 		  op0 = RegX0; op1 = rd; op2 = 0;
+      isIType = true;
 		  return instTable_.getInstInfo(InstId::c_jr);
 		}
 	      op0 = rd; op1 = RegX0; op2 = rs2;
+        isRType = true;
 	      return instTable_.getInstInfo(InstId::c_mv);
 	    }
 	  else  // c.ebreak, c.jalr or c.add 
@@ -425,9 +458,11 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 		  if (rd == RegX0)
 		    return instTable_.getInstInfo(InstId::c_ebreak);
 		  op0 = RegRa; op1 = rd; op2 = 0;
+      isIType = true;
 		  return instTable_.getInstInfo(InstId::c_jalr);
 		}
 	      op0 = rd; op1 = rd; op2 = rs2;
+        isRType = true;
 	      return instTable_.getInstInfo(InstId::c_add);
 	    }
 	}
@@ -447,6 +482,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	{
 	  CswspFormInst csw(inst);
 	  op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.swImmed();
+    isSType = true;
 	  return instTable_.getInstInfo(InstId::c_swsp);
 	}
 
@@ -456,6 +492,7 @@ Core<URV>::decode16(uint16_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2)
 	    {
 	      CswspFormInst csw(inst);
 	      op0 = RegSp; op1 = csw.bits.rs2; op2 = csw.sdImmed();
+        isSType = true;
 	      return instTable_.getInstInfo(InstId::c_sdsp);
 	    }
 	  if (isRvf())   // c.fswsp
@@ -488,11 +525,18 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
 				  &&l24, &&l25, &&l26, &&l27, &&l28, &&l29,
 				  &&l30, &&l31 };
 
+  isRType = false;
+  isIType = false;
+  isSType = false;
+  isBType = false;
+  isUType = false;
+  isJType = false;
+
   if (isCompressedInst(inst))
     {
       // return decode16(inst, op0, op1, op2);
       if (not isRvc())
-	inst = 0; // All zeros: illegal 16-bit instruction.
+        inst = 0; // All zeros: illegal 16-bit instruction.
       return decode16(uint16_t(inst), op0, op1, op2);
     }
 
@@ -509,6 +553,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l0:  // 00000   I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed(); 
@@ -529,6 +574,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l1:
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -538,13 +584,46 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
       }
       return instTable_.getInstInfo(InstId::illegal);
 
-    l2:
+    // Picorv32 custom instructions
+    l2: {
+      RFormInst rform(inst);
+      op0 = rform.bits.rd;
+      op1 = rform.bits.rs1;
+      op2 = rform.bits.rs2;
+      unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
+      if (funct7 == 0) {
+        if      (funct3 == 4) return instTable_.getInstInfo(InstId::getq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 1) {
+        if      (funct3 == 2) return instTable_.getInstInfo(InstId::setq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 2) {
+        if      (funct3 == 0) return instTable_.getInstInfo(InstId::retirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 3) {
+        if      (funct3 == 6) return instTable_.getInstInfo(InstId::maskirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 4) {
+        if      (funct3 == 4) return instTable_.getInstInfo(InstId::waitirq);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      else if (funct7 == 5) {
+        if      (funct3 == 6) return instTable_.getInstInfo(InstId::timer);
+        else    return instTable_.getInstInfo(InstId::illegal);
+      }
+      return instTable_.getInstInfo(InstId::illegal);
+    }
     l7:
       return instTable_.getInstInfo(InstId::illegal);
 
     l9:
       {
 	SFormInst sform(inst);
+  isSType = true;
 	op0 = sform.bits.rs1;
 	op1 = sform.bits.rs2;
 	op2 = sform.immed();
@@ -561,6 +640,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l16:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -576,6 +656,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l17:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -591,6 +672,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l18:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -606,6 +688,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l19:
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd, op1 = rform.bits.rs1, op2 = rform.bits.rs2;
 	unsigned funct7 = rform.bits.funct7, funct3 = rform.bits.funct3;
 	instRoundingMode_ = RoundingMode(funct3);
@@ -633,6 +716,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l3: // 00011  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	unsigned funct3 = iform.fields.funct3;
 	if (iform.fields.rd == 0 and iform.fields.rs1 == 0)
 	  {
@@ -657,6 +741,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l4:  // 00100  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -711,6 +796,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l5:  // 00101   U-form
       {
 	UFormInst uform(inst);
+  isUType = true;
 	op0 = uform.bits.rd;
 	op1 = uform.immed();
 	return instTable_.getInstInfo(InstId::auipc);
@@ -720,6 +806,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l6:  // 00110  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -748,6 +835,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l8:  // 01000  S-form
       {
 	SFormInst sform(inst);
+  isSType = true;
 	op0 = sform.bits.rs1;
 	op1 = sform.bits.rs2;
 	op2 = sform.immed();
@@ -769,6 +857,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
 	if (not isRva())
 	  return instTable_.getInstInfo(InstId::illegal);
 	RFormInst rf(inst);
+  isRType = true;
 	uint32_t top5 = rf.top5(), f3 = rf.bits.funct3;
 	op0 = rf.bits.rd; op1 = rf.bits.rs1; op2 = rf.bits.rs2;
 
@@ -807,6 +896,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l12:  // 01100  R-form
       {
 	RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd;
 	op1 = rform.bits.rs1;
 	op2 = rform.bits.rs2;
@@ -867,6 +957,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l13:  // 01101  U-form
       {
 	UFormInst uform(inst);
+  isUType = true;
 	op0 = uform.bits.rd;
 	op1 = uform.immed();
 	return instTable_.getInstInfo(InstId::lui);
@@ -875,6 +966,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l14: // 01110  R-Form
       {
 	const RFormInst rform(inst);
+  isRType = true;
 	op0 = rform.bits.rd;
 	op1 = rform.bits.rs1;
 	op2 = rform.bits.rs2;
@@ -904,6 +996,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l24: // 11000   B-form
       {
 	BFormInst bform(inst);
+  isBType = true;
 	op0 = bform.bits.rs1;
 	op1 = bform.bits.rs2;
 	op2 = bform.immed();
@@ -920,6 +1013,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l25:  // 11001  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.immed();
@@ -931,6 +1025,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l27:  // 11011  J-form
       {
 	JFormInst jform(inst);
+  isJType = true;
 	op0 = jform.bits.rd;
 	op1 = jform.immed();
 	return instTable_.getInstInfo(InstId::jal);
@@ -939,6 +1034,7 @@ Core<URV>::decode(uint32_t inst, uint32_t& op0, uint32_t& op1, int32_t& op2,
     l28:  // 11100  I-form
       {
 	IFormInst iform(inst);
+  isIType = true;
 	op0 = iform.fields.rd;
 	op1 = iform.fields.rs1;
 	op2 = iform.uimmed(); // csr

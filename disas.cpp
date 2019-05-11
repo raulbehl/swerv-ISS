@@ -601,6 +601,45 @@ Core<URV>::disassembleInst32(uint32_t inst, std::ostream& out)
       }
       break;
 
+  case 2: {  // 00010  R-form
+	  RFormInst rform(inst);
+	  unsigned rd = rform.bits.rd, rs1 = rform.bits.rs1, rs2 = rform.bits.rs2;
+	  unsigned f7 = rform.bits.funct7, f3 = rform.bits.funct3;
+	  if (f7 == 0)
+	    {
+	      if      (f3 == 4)  printRdRs1Rs2(*this, out, "getq",  rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else if (f7 == 1)
+	    {
+	      if (f3 == 2)       printRdRs1Rs2(*this, out, "setq",    rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else if (f7 == 2)
+	    {
+	      if (f3 == 0)       printRdRs1Rs2(*this, out, "retirq",    rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else if (f7 == 3)
+	    {
+	      if (f3 == 6)       printRdRs1Rs2(*this, out, "maskirq",    rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else if (f7 == 4)
+	    {
+	      if (f3 == 4)       printRdRs1Rs2(*this, out, "waitirq",    rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else if (f7 == 5)
+	    {
+	      if (f3 == 6)       printRdRs1Rs2(*this, out, "timer",    rd, rs1, rs2);
+	      else               out << "illegal";
+	    }
+	  else
+	    out << "illegal";
+  }
+  break;
+
     case 3:  // 00011  I-form
       {
 	IFormInst iform(inst);
